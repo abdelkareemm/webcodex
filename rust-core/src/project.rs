@@ -11,14 +11,20 @@ const KEY_FILES:&[&str]=&["readme","pyproject.toml","package.json","cargo.toml",
 fn secret(name:&str)->bool {let n=name.to_lowercase();SECRETS.contains(&n.as_str())||[".pem",".key",".p12",".pfx",".keystore",".jks",".ppk"].iter().any(|s|n.ends_with(s)) || ((n==".env"||n.starts_with(".env.")) && ![".example",".sample",".template",".dist"].iter().any(|s|n.ends_with(s)))}
 fn relative(root:&Path,path:&Path)->String {path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\',"/")}
 fn text(path:&Path)->Option<String> {let bytes=fs::read(path).ok()?;if bytes.iter().take(8192).any(|b|*b==0){return None};String::from_utf8(bytes).ok().map(|s|s.replace("\r\n","\n"))}
-fn scan(root:&Path,max_files:usize)->Result<BTreeMap<String,Value>,String>{
+fn scan(root:&Path,_max_files:usize)->Result<BTreeMap<String,Value>,String>{
     let mut result=BTreeMap::new();
     let mut wb=WalkBuilder::new(root);wb.hidden(false).require_git(false).git_ignore(true).git_global(false).git_exclude(false).parents(false).add_custom_ignore_filename(".webcodexignore");
-    wb.filter_entry(|e|e.depth()==0||!e.file_type().is_some_and(|t|t.is_dir())||!DIRS.contains(&e.file_name().to_string_lossy().as_ref()));
+    wb.filter_entry(|e|{
+        if e.depth()==0 || !e.file_type().is_some_and(|t|t.is_dir()) {return true}
+        let name=e.file_name().to_string_lossy();
+        !DIRS.contains(&name.as_ref())
+            && name!="build-test"
+            && name!="target-staging"
+            && !name.starts_with("cmake-build-")
+    });
     for entry in wb.build() {
         let e=match entry{Ok(e)=>e,Err(_)=>continue};if !e.file_type().is_some_and(|t|t.is_file()) {continue}
         let file=e.file_name().to_string_lossy().to_string();if NAMES.contains(&file.as_str())||secret(&file){continue}
-        if result.len()>=max_files{return Err(format!("More than {max_files} files in {}",root.display()))}
         let rel=relative(root,e.path());let size=e.metadata().map(|m|m.len()).unwrap_or(0);
         let lower=rel.to_lowercase();
         let note=if EXT.iter().any(|ext|lower.ends_with(ext)){"binary"}else if size>300_000{"too large"}else{""};
@@ -60,4 +66,35 @@ pub fn handle(op:&str,req:&Value)->Result<Value,String> {
       _=>Err(format!("unknown project operation: {op}"))
     }
 }
-#[cfg(test)] mod tests{use super::*;#[test]fn ignores_secrets(){assert!(secret(".env"));assert!(!secret(".env.example"));assert!(secret("id_rsa"));}}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime,UNIX_EPOCH};
+
+    #[test]
+    fn ignores_secrets(){
+        assert!(secret(".env"));
+        assert!(!secret(".env.example"));
+        assert!(secret("id_rsa"));
+    }
+
+    #[test]
+    fn supports_more_than_four_thousand_files(){
+        let stamp=SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root=std::env::temp_dir().join(format!(
+            "webcodex-large-scan-{}-{stamp}",std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+
+        let result=(||{
+            for index in 0..4100 {
+                fs::write(root.join(format!("source-{index:05}.rs")),"").unwrap();
+            }
+            scan(&root,4000)
+        })();
+
+        let _=fs::remove_dir_all(&root);
+        let entries=result.expect("scanner must support repositories larger than 4000 files");
+        assert_eq!(entries.len(),4100);
+    }
+}

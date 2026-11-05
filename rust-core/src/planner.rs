@@ -12,9 +12,19 @@ fn read(root:&Path,rel:&str)->String{
 }
 fn render_tree(entries:&BTreeMap<String,Value>)->String{
     if entries.is_empty(){return "(empty folder)".into()}
-    entries.iter().map(|(rel,e)|{
-        let note=e["note"].as_str().unwrap_or("");if note.is_empty(){rel.clone()}else{format!("{rel}  ({note})")}
-    }).collect::<Vec<_>>().join("\n")
+    const MAX_VISIBLE:usize=300;
+    let mut lines=Vec::new();
+    for (rel,e) in entries.iter().take(MAX_VISIBLE){
+        let note=e["note"].as_str().unwrap_or("");
+        lines.push(if note.is_empty(){rel.clone()}else{format!("{rel}  ({note})")});
+    }
+    if entries.len()>MAX_VISIBLE{
+        lines.push(format!(
+            "... {} additional indexed files not shown. Use NEED: to request specific files.",
+            entries.len()-MAX_VISIBLE
+        ));
+    }
+    lines.join("\n")
 }
 fn render_files(root:&Path, included:&[String])->String{
     included.iter().map(|rel|{
@@ -51,8 +61,14 @@ pub fn handle(req:&Value)->Result<Value,String>{
         let removed:Vec<_>=sent_paths.difference(&new_paths).cloned().collect();
         if !added.is_empty()||!removed.is_empty(){
             let mut lines=vec!["FILE TREE CHANGES SINCE YOUR LAST MESSAGE:".to_string()];
-            lines.extend(added.iter().map(|r|format!("  added: {r}")));
-            lines.extend(removed.iter().map(|r|format!("  removed: {r}")));
+            lines.extend(added.iter().take(100).map(|r|format!("  added: {r}")));
+            lines.extend(removed.iter().take(100).map(|r|format!("  removed: {r}")));
+            if added.len()>100 {
+                lines.push(format!("  ... {} additional added files",added.len()-100));
+            }
+            if removed.len()>100 {
+                lines.push(format!("  ... {} additional removed files",removed.len()-100));
+            }
             parts.push(lines.join("\n"));
         }
     }
@@ -78,7 +94,16 @@ pub fn handle(req:&Value)->Result<Value,String>{
     if first {for r in &omitted{next_hash.insert(r.clone(),entries[r]["hash"].as_str().unwrap_or("").into());}}
     if !notes.is_empty(){parts.push(format!("NOTES FROM THE USER'S TOOL:\n{}",notes.iter().map(|n|format!("- {n}")).collect::<Vec<_>>().join("\n")));}
     if !feedback.is_empty(){parts.push(format!("TOOL RESULTS:\n{}",feedback.join("\n")));}
-    if !omitted.is_empty(){parts.push(format!("FILES NOT INCLUDED (too large or over the size budget; ask with NEED: if required):\n{}",omitted.iter().map(|r|format!("  {r}")).collect::<Vec<_>>().join("\n")));}
+    if !omitted.is_empty(){
+        let mut lines:Vec<String>=omitted.iter().take(100).map(|r|format!("  {r}")).collect();
+        if omitted.len()>100 {
+            lines.push(format!("  ... {} more omitted files. Request specific paths with NEED:.",omitted.len()-100));
+        }
+        parts.push(format!(
+            "FILES NOT INCLUDED ({} files over the size or context budget; ask with NEED: if required):\n{}",
+            omitted.len(),lines.join("\n")
+        ));
+    }
     if !included.is_empty(){
         let label=if first{"FILE CONTENTS:"}else{"UPDATED / REQUESTED FILE CONTENTS (current state):"};
         parts.push(format!("{label}\n{}",render_files(root,&included)));
