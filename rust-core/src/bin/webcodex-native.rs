@@ -365,6 +365,13 @@ impl Agent {
     }
     fn handle_reply(&mut self,reply:&str)->Result<(Vec<String>,Vec<String>),String>{
         let parsed=self.worker("parse_reply",json!({"text":reply}))?;
+        let parse_errors=strings(&parsed["errors"]);
+        if !parse_errors.is_empty(){
+            return Ok((
+                parse_errors.into_iter().map(|e|format!("EDIT REJECTED: {e}")).collect(),
+                Vec::new()
+            ));
+        }
         let mut feedback=Vec::new();let mut pins=Vec::new();let backup=self.backup_dir();
         let mut manifest:BTreeMap<String,Vec<String>>=BTreeMap::new();
         let mut grouped:BTreeMap<String,Vec<Value>>=BTreeMap::new();

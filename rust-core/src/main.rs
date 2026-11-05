@@ -60,7 +60,7 @@ fn locate(text: &str, search: &str) -> Result<(usize, usize, Option<(String,Stri
     Err(format!("SEARCH text not found in file (it began with: {prefix:?})"))
 }
 fn apply(text:Option<String>, blocks:&[EditBlock])->PatchResult {
-    let mut current=text;
+    let mut current=text.clone();
     let mut errors=Vec::new();
     let mut applied=0;
     for b in blocks {
@@ -84,6 +84,9 @@ fn apply(text:Option<String>, blocks:&[EditBlock])->PatchResult {
             },
             Err(msg)=>errors.push(format!("{}: {}",b.path,msg)),
         }
+    }
+    if !errors.is_empty() {
+        return PatchResult{text,errors,applied:0};
     }
     PatchResult{text:current,errors,applied}
 }
@@ -163,5 +166,24 @@ mod tests {
     #[test] fn create_file(){let r=apply(None,&[block("","hello")]);assert_eq!(r.text.as_deref(),Some("hello\n"));}
     #[test] fn reject_ambiguous(){let r=apply(Some("x\nx".into()),&[block("x","y")]);assert_eq!(r.applied,0);assert_eq!(r.errors.len(),1);}
     #[test] fn reject_missing(){let r=apply(None,&[block("x","y")]);assert_eq!(r.applied,0);}
+    #[test] fn failed_batch_preserves_original(){
+        let original="first\nsecond\n".to_string();
+        let result=apply(Some(original.clone()),&[
+            block("first","modified"),
+            block("does-not-exist","unexpected")
+        ]);
+        assert_eq!(result.applied,0);
+        assert_eq!(result.text,Some(original));
+        assert_eq!(result.errors.len(),1);
+    }
+    #[test] fn failed_batch_does_not_create_partial_file(){
+        let result=apply(None,&[
+            block("","new content"),
+            block("does-not-exist","unexpected")
+        ]);
+        assert_eq!(result.applied,0);
+        assert_eq!(result.text,None);
+        assert_eq!(result.errors.len(),1);
+    }
     #[test] fn whitespace_fallback(){let r=apply(Some("  alpha  \n  beta\n".into()),&[block("alpha\nbeta","gamma")]);assert_eq!(r.applied,1);}
 }

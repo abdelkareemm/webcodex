@@ -714,12 +714,10 @@ class BrowserTransport:
                 text = rs.text if rs is not None else ""
                 if rs is not None and open_:
                     streaming = True  # the page's reply stream is still running
-                if rs is None or not text or (not open_ and not rs.finished):
-                    # No usable stream (hook blocked, or the stream closed early and the rest
-                    # came another way): scrape the DOM and keep whichever text is longer.
-                    dom = self._extract(n0)
-                    if len(dom) > len(text):
-                        text = dom
+                if rs is None:
+                    text = self._extract(n0)
+                elif not open_ and not rs.finished:
+                    raise TransportError("ChatGPT response stream ended before completion.")
                 now = time.time()
                 if text != last_text:
                     last_text, last_change = text, now
@@ -748,6 +746,18 @@ class BrowserTransport:
                     time.sleep(0.5)
                     continue
                 if not streaming and text and now - last_change >= cfg.stable_secs:
+                    if rs is None and re.search(
+                        r"(?m)^\s*(?:FILE:|<<<<<<< SEARCH|>>>>>>> REPLACE|DELETE:|RUN:)",
+                        text,
+                    ):
+                        raise TransportError(
+                            "Executable instructions were recovered from DOM text, "
+                            "not a verified response stream. Refusing to execute them."
+                        )
+                    if rs is not None and not rs.finished:
+                        raise TransportError(
+                            "Response stream has not completed. Refusing a partial reply."
+                        )
                     if not streamed:
                         self._clear_status()
                     return text
