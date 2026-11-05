@@ -6,15 +6,24 @@ use ratatui::{backend::CrosstermBackend, layout::{Constraint, Direction, Layout,
 use serde::{Deserialize, Serialize};
 use unicode_width::UnicodeWidthChar;
 
+mod command_palette;
+
 #[derive(Debug, Deserialize)]
 struct Incoming { kind: String, #[serde(default)] title: String, #[serde(default)] body: String }
 #[derive(Serialize)]
 struct Outgoing<'a> { kind: &'a str, body: &'a str }
 #[derive(Clone)]
 struct Entry { kind: String, text: String }
-struct App { cached_rows: Vec<Line<'static>>, cache_width: usize, transcript_dirty: bool, entries: Vec<Entry>, draft: String, cursor: usize, scroll: u16, tail: bool, busy: bool, approval: Option<String>, exit: bool, project: String, history: Vec<String>, history_index: Option<usize>, history_stash: String, status: String, ready: bool, max_scroll: u16, tick: u64 }
+#[derive(Clone, Debug, Deserialize)]
+struct SettingsView {
+    auto_apply: bool,
+    allow_run: bool,
+    approval_never: bool,
+    max_turns: usize,
+}
+struct App { cached_rows: Vec<Line<'static>>, cache_width: usize, transcript_dirty: bool, entries: Vec<Entry>, draft: String, cursor: usize, scroll: u16, tail: bool, busy: bool, approval: Option<String>, settings: Option<SettingsView>, settings_index: usize, exit: bool, project: String, history: Vec<String>, history_index: Option<usize>, history_stash: String, status: String, ready: bool, max_scroll: u16, tick: u64, palette_index: usize }
 impl App {
-    fn new(project: String) -> Self { Self { cached_rows: Vec::new(), cache_width: 0, transcript_dirty: true, entries: vec![], draft: String::new(), cursor: 0, scroll: 0, tail: true, busy: false, approval: None, exit: false, project, history: Vec::new(), history_index: None, history_stash: String::new(), status: "Starting WebCodex…".into(), ready: false, max_scroll: 0, tick: 0 } }
+    fn new(project: String) -> Self { Self { cached_rows: Vec::new(), cache_width: 0, transcript_dirty: true, entries: vec![], draft: String::new(), cursor: 0, scroll: 0, tail: true, busy: false, approval: None, settings: None, settings_index: 0, exit: false, project, history: Vec::new(), history_index: None, history_stash: String::new(), status: "Starting WebCodex…".into(), ready: false, max_scroll: 0, tick: 0, palette_index: 0 } }
     fn push(&mut self, kind: String, text: String) { if kind == "clear" {self.entries.clear(); self.scroll=0; self.tail=true; self.transcript_dirty=true; return} let text=if kind=="assistant" {sanitize_display(&hide_code_blocks(&text))} else {sanitize_display(&text)}; if text.is_empty() && kind=="assistant" {return;} if kind=="user" && self.history.last()!=Some(&text) {self.history.push(text.clone());}
         self.entries.push(Entry{kind,text}); self.transcript_dirty=true; if self.tail { self.scroll=u16::MAX; } }
     fn stream(&mut self, text: String) {
@@ -42,7 +51,38 @@ impl App {
         self.tail=self.scroll>=self.max_scroll;
     }
     fn jump_bottom(&mut self) {self.tail=true;self.scroll=self.max_scroll;}
-    fn set_draft(&mut self, text:String) {self.draft=text;self.cursor=self.draft.len();}
+    fn set_draft(&mut self, text:String) {
+        self.draft=text;
+        self.cursor=self.draft.len();
+        self.palette_index=0;
+    }
+    fn selected_setting_command(&self)->Option<&'static str>{
+        let settings=self.settings.as_ref()?;
+        match self.settings_index {
+            0=>Some("/permissions ask"),
+            1=>Some("/permissions auto"),
+            2=>Some(if settings.allow_run {
+                "/permissions commands-off"
+            }else{
+                "/permissions commands-on"
+            }),
+            3=>Some("/turns 25"),
+            4=>Some("/turns 100"),
+            5=>Some("/turns 250"),
+            6=>Some("/turns 500"),
+            _=>None,
+        }
+    }
+    fn complete_palette(&mut self)->bool {
+        if !self.draft.starts_with('/') {return false;}
+        let matches=command_palette::search(&self.draft);
+        let Some(command)=matches.get(self.palette_index.min(matches.len().saturating_sub(1))) else {
+            return false;
+        };
+        if self.draft==command.name {return false;}
+        self.set_draft(command.name.to_string());
+        true
+    }
     fn recall_prev(&mut self) {
         if self.history.is_empty(){return;}
         let next=match self.history_index {None=>{self.history_stash=self.draft.clone();self.history.len()-1},Some(i)=>i.saturating_sub(1)};
@@ -58,8 +98,19 @@ impl App {
         self.history_index=None;self.history_stash.clear();
         self.push("user".into(),task);self.draft.clear();self.cursor=0;self.busy=true;self.jump_bottom();
     }
-    fn put(&mut self, c:char) { self.draft.insert(self.cursor,c); self.cursor+=c.len_utf8(); }
-    fn backspace(&mut self) { if self.cursor>0 {let i=self.draft[..self.cursor].char_indices().last().map(|(i,_)|i).unwrap_or(0); self.draft.drain(i..self.cursor); self.cursor=i;} }
+    fn put(&mut self, c:char) {
+        self.draft.insert(self.cursor,c);
+        self.cursor+=c.len_utf8();
+        self.palette_index=0;
+    }
+    fn backspace(&mut self) {
+        if self.cursor>0 {
+            let i=self.draft[..self.cursor].char_indices().last().map(|(i,_)|i).unwrap_or(0);
+            self.draft.drain(i..self.cursor);
+            self.cursor=i;
+            self.palette_index=0;
+        }
+    }
     fn delete_forward(&mut self) { if self.cursor<self.draft.len() { let l=self.draft[self.cursor..].chars().next().unwrap().len_utf8();self.draft.drain(self.cursor..self.cursor+l); } }
 }
 
@@ -402,7 +453,90 @@ fn render(f: &mut ratatui::Frame,app: &mut App) {
     let x=rows[3].x.saturating_add(1).saturating_add((cursor_col%inner_width) as u16);
     if y<rows[3].bottom().saturating_sub(1){f.set_cursor_position((x,y));}
     let footer=if app.approval.is_some() {"  Y allow  ·  N deny  ·  A always allow"} else {"  Enter send · ↑ history · PgUp/PgDn scroll · End latest · Alt+Enter newline · Ctrl+Q quit"};
+    let footer=if app.draft.starts_with('/') {
+        "  Up/Down select  |  Tab complete  |  Enter execute  |  Esc dismiss"
+    } else {
+        footer
+    };
     f.render_widget(Paragraph::new(Span::styled(footer,theme_muted())),rows[4]);
+    if app.draft.starts_with('/') && !app.busy && app.approval.is_none()
+        && area.width >= 45 && area.height >= 18
+    {
+        let matches=command_palette::search(&app.draft);
+        let count=matches.len().min(7);
+        if count>0 {
+            let width=area.width.saturating_sub(8).min(80);
+            let height=count as u16+2;
+            let popup=Rect {
+                x:area.x+4,
+                y:rows[3].y.saturating_sub(height),
+                width,
+                height,
+            };
+            let items=matches.iter().take(count).enumerate().map(|(i,command)| {
+                let style=if i==app.palette_index.min(count-1) {
+                    Style::default().fg(Color::White).bg(Color::Rgb(55,55,65))
+                } else {
+                    theme_muted()
+                };
+                Line::from(Span::styled(
+                    format!("  {:<12} {}",command.name,command.description),
+                    style
+                ))
+            }).collect::<Vec<_>>();
+            f.render_widget(Clear,popup);
+            f.render_widget(
+                Paragraph::new(items).block(
+                    Block::default().title(" Commands ").borders(Borders::ALL)
+                ),
+                popup
+            );
+        }
+    }
+    if let Some(settings)=&app.settings {
+        let width=area.width.saturating_sub(4).min(68).max(1);
+        let height=16.min(area.height);
+        let popup=Rect {
+            x:area.x+(area.width.saturating_sub(width))/2,
+            y:area.y+(area.height.saturating_sub(height))/2,
+            width,
+            height,
+        };
+        let options=[
+            ("Ask before changes", "Require approval for edits and commands"),
+            ("Automatic execution", "Unrestricted changes and shell execution"),
+            ("Toggle shell commands", "Enable or disable command execution"),
+            ("25 turns", "Short autonomous tasks"),
+            ("100 turns", "Standard autonomous tasks"),
+            ("250 turns", "Extended autonomous tasks"),
+            ("500 turns", "Long-running autonomous tasks"),
+        ];
+        let mut lines=vec![
+            Line::from(format!("  File edits: {}",if settings.auto_apply {"automatic"}else{"approval required"})),
+            Line::from(format!("  Shell commands: {}",if settings.allow_run {"enabled"}else{"disabled"})),
+            Line::from(format!("  Approval prompts: {}",if settings.approval_never {"disabled"}else{"enabled"})),
+            Line::from(format!("  Maximum task turns: {}",settings.max_turns)),
+            Line::from(""),
+        ];
+        for (index,(name,description)) in options.iter().enumerate(){
+            let style=if app.settings_index==index {
+                Style::default().fg(Color::White).bg(Color::Rgb(55,55,65))
+            }else{
+                theme_muted()
+            };
+            lines.push(Line::from(Span::styled(format!(
+                "  {} {} - {}",if app.settings_index==index {">"}else{" "},name,description
+            ),style)));
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("  Up/Down select  |  Enter apply  |  Esc close",theme_muted())));
+        f.render_widget(Clear,popup);
+        f.render_widget(
+            Paragraph::new(lines).wrap(Wrap{trim:false})
+                .block(Block::default().title(" Settings ").borders(Borders::ALL)),
+            popup,
+        );
+    }
     if let Some(question)=&app.approval {
         let w=area.width.saturating_sub(8).min(85).max(15);
         let h=7.min(area.height);
@@ -413,6 +547,12 @@ fn render(f: &mut ratatui::Frame,app: &mut App) {
 }
 fn on_message(app:&mut App, m:Incoming) {match m.kind.as_str() {
     "busy"=>app.busy=m.body=="true", "status"=>{app.status=m.body;if app.entries.is_empty(){app.transcript_dirty=true;}}, "ready"=>{app.ready=true;app.status.clear();if app.entries.is_empty(){app.transcript_dirty=true;}}, "approve"=>app.approval=Some(m.body), "exit"=>app.exit=true,
+    "settings"=>{
+        if let Ok(settings)=serde_json::from_str::<SettingsView>(&m.body){
+            app.settings=Some(settings);
+            app.settings_index=0;
+        }
+    },
     "stream"=>app.stream(m.body), "stream_end"=>app.end_stream(m.body),
     "history"=>{if let Ok(messages)=serde_json::from_str::<Vec<(String,String)>>(&m.body){app.load_history(&messages);}},
     "user"|"assistant"|"error"|"activity"|"output"|"system"|"clear"=>app.push(m.kind,if m.body.is_empty(){m.title}else{m.body}),
@@ -514,8 +654,45 @@ fn loop_ui(terminal:&mut Terminal<CrosstermBackend<io::Stdout>>, sock:&mut TcpSt
                     if let Some(a)=ans {send(sock,"approve",a)?;app.approval=None;}
                     continue;
                 }
+                if app.settings.is_some(){
+                    match code {
+                        KeyCode::Esc=>app.settings=None,
+                        KeyCode::Up=>app.settings_index=(app.settings_index+6)%7,
+                        KeyCode::Down=>app.settings_index=(app.settings_index+1)%7,
+                        KeyCode::Enter if !app.busy=>{
+                            if let Some(command)=app.selected_setting_command(){
+                                send(sock,"task",command)?;
+                                app.settings=None;
+                                app.set_draft(String::new());
+                                app.history_index=None;
+                                app.busy=true;
+                            }
+                        },
+                        _=>{},
+                    }
+                    continue;
+                }
                 match code {
                     KeyCode::Char('q') if modifiers.contains(KeyModifiers::CONTROL)=>{send(sock,"exit","")?;break;},
+                    KeyCode::Char('k') if modifiers.contains(KeyModifiers::CONTROL)=>{
+                        app.set_draft("/".into());
+                        app.palette_index=0;
+                    },
+                    KeyCode::Esc if app.draft.starts_with('/')=>{
+                        app.set_draft(String::new());
+                        app.palette_index=0;
+                    },
+                    KeyCode::Tab if app.draft.starts_with('/')=>{
+                        app.complete_palette();
+                    },
+                    KeyCode::Up if app.draft.starts_with('/')=>{
+                        let count=command_palette::search(&app.draft).len().min(7);
+                        if count>0 {app.palette_index=(app.palette_index+count-1)%count;}
+                    },
+                    KeyCode::Down if app.draft.starts_with('/')=>{
+                        let count=command_palette::search(&app.draft).len().min(7);
+                        if count>0 {app.palette_index=(app.palette_index+1)%count;}
+                    },
                     KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL)=>{app.draft.clear();app.cursor=0;app.history_index=None;},
                     KeyCode::Char('l') if modifiers.contains(KeyModifiers::CONTROL)=>{app.entries.clear();app.transcript_dirty=true;app.jump_bottom();full_repaint=true;},
                     KeyCode::PageUp=>{app.move_scroll(-20);full_repaint=true;},KeyCode::PageDown=>{app.move_scroll(20);full_repaint=true;},
@@ -525,6 +702,7 @@ fn loop_ui(terminal:&mut Terminal<CrosstermBackend<io::Stdout>>, sock:&mut TcpSt
                     KeyCode::Up if !modifiers.contains(KeyModifiers::ALT) && !app.draft.contains('\n')=>app.recall_prev(),
                     KeyCode::Down if !modifiers.contains(KeyModifiers::ALT) && !app.draft.contains('\n')=>app.recall_next(),
                     KeyCode::Enter if modifiers.contains(KeyModifiers::ALT)=>app.put('\n'),
+                    KeyCode::Enter if app.draft.starts_with('/') && app.complete_palette()=>{},
                     KeyCode::Enter=>if app.ready && !app.busy && !app.draft.trim().is_empty(){
                         let task=app.draft.trim().to_string();send(sock,"task",&task)?;
                         app.submit(task);
@@ -546,6 +724,77 @@ fn main(){let mut args=env::args().skip(1);let port=args.next().and_then(|s|s.pa
 #[cfg(test)]
 mod regression_tests {
     use super::*;
+    #[test]
+    fn settings_panel_selects_real_commands(){
+        let mut app=App::new("project".into());
+        app.settings=Some(SettingsView{
+            auto_apply:false,
+            allow_run:false,
+            approval_never:false,
+            max_turns:100,
+        });
+        assert_eq!(app.selected_setting_command(),Some("/permissions ask"));
+        app.settings_index=1;
+        assert_eq!(app.selected_setting_command(),Some("/permissions auto"));
+        app.settings_index=2;
+        assert_eq!(app.selected_setting_command(),Some("/permissions commands-on"));
+        app.settings.as_mut().unwrap().allow_run=true;
+        assert_eq!(app.selected_setting_command(),Some("/permissions commands-off"));
+        app.settings_index=3;
+        assert_eq!(app.selected_setting_command(),Some("/turns 25"));
+        app.settings_index=4;
+        assert_eq!(app.selected_setting_command(),Some("/turns 100"));
+        app.settings_index=5;
+        assert_eq!(app.selected_setting_command(),Some("/turns 250"));
+        app.settings_index=6;
+        assert_eq!(app.selected_setting_command(),Some("/turns 500"));
+        app.settings_index=7;
+        assert_eq!(app.selected_setting_command(),None);
+    }
+
+    #[test]
+    fn settings_message_opens_panel(){
+        let mut app=App::new("project".into());
+        on_message(&mut app,Incoming{
+            kind:"settings".into(),
+            title:String::new(),
+            body:r#"{"auto_apply":false,"allow_run":true,"approval_never":false,"max_turns":100}"#.into(),
+        });
+        assert!(app.settings.is_some());
+        assert_eq!(app.settings.as_ref().unwrap().max_turns,100);
+    }
+
+    #[test]
+    fn palette_completes_partial_command() {
+        let mut app=App::new("project".into());
+        app.set_draft("/sta".into());
+        assert!(app.complete_palette());
+        assert_eq!(app.draft,"/status");
+        assert!(!app.complete_palette());
+    }
+
+    #[test]
+    fn palette_respects_arrow_selection() {
+        let mut app=App::new("project".into());
+        app.set_draft("/".into());
+        let commands=command_palette::search("/");
+        app.palette_index=1;
+        assert!(app.complete_palette());
+        assert_eq!(app.draft,commands[1].name);
+        assert_eq!(app.palette_index,0);
+    }
+
+    #[test]
+    fn palette_resets_selection_after_typing() {
+        let mut app=App::new("project".into());
+        app.palette_index=4;
+        app.put('/');
+        assert_eq!(app.palette_index,0);
+        app.palette_index=3;
+        app.backspace();
+        assert_eq!(app.palette_index,0);
+    }
+
     #[test]
     fn streaming_updates_one_transcript_entry() {
         let mut app=App::new("project".into());

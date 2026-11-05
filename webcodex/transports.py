@@ -122,6 +122,7 @@ class BrowserTransport:
         self._browser = None
         self._ctx = None
         self.page = None
+        self._pending_reply = None
 
     # ---- lifecycle ------------------------------------------------------
     def start(self) -> None:
@@ -651,13 +652,38 @@ class BrowserTransport:
         return False
 
     def send(self, text: str, on_update=None) -> str:
+        if self._pending_reply is not None:
+            raise TransportError(
+                "A previous response remains unresolved. Recover it before sending another prompt."
+            )
         n0 = self._count()
         u0 = self._count_key("user")
         s0 = self._stream_count()
         self._set_text(text)
+        self._pending_reply = (n0, s0)
         ok = self._submit(u0, n0, s0)
-        # If we couldn't send, give a human time to press Send themselves.
-        return self._wait_reply(n0, on_update, start_timeout=None if ok else 600, s0=s0)
+        # An error after submission must not cause an automatic resend.
+        answer = self._wait_reply(n0, on_update, start_timeout=None if ok else 600, s0=s0)
+        self._pending_reply = None
+        return answer
+
+    def recover(self, on_update=None) -> str:
+        """Read an interrupted reply without submitting another prompt.
+
+        Recovery requires a recorded response stream from the pending send.
+        DOM-only text is insufficient evidence for executing model instructions.
+        """
+        if self._pending_reply is None:
+            raise TransportError("No interrupted response is available to recover.")
+        n0, s0 = self._pending_reply
+        if self._stream_count() <= s0:
+            raise TransportError(
+                "No verified response stream was found for the pending prompt. "
+                "Submission status is uncertain; refusing to resend automatically."
+            )
+        answer = self._wait_reply(n0, on_update, s0=s0)
+        self._pending_reply = None
+        return answer
 
     def _thinking_text(self) -> str:
         sels = self.cfg.selectors.get("thinking") or []

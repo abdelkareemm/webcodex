@@ -8,7 +8,7 @@ use std::{collections::{BTreeMap},env,fs,io::{self,BufRead,BufReader,Write,IsTer
 
 const PROTOCOL:&str=include_str!("../../assets/protocol.txt");
 const REMINDER:&str=include_str!("../../assets/reminder.txt");
-const HELP:&str="/new  start a new chat; /chat show chat URL; /undo undo last edit set; /yes toggle auto-apply; /run toggle shell commands; /files show visible files; /status show settings; /help; /quit";
+const HELP:&str="/new  start a new chat; /chat show chat URL; /undo undo last edit set; /yes toggle auto-apply; /run toggle shell commands; /permissions change execution permissions; /settings interactive settings; /turns [1-1000] task turn limit; /files show visible files; /status show settings; /help; /quit";
 
 fn err<T:ToString>(value:T)->String{value.to_string()}
 fn strings(v:&Value)->Vec<String>{v.as_array().map(|a|a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default()}
@@ -16,6 +16,23 @@ fn home()->PathBuf {
     if let Ok(p)=env::var("WEBCODEX_HOME"){return PathBuf::from(p)}
     let home=env::var("USERPROFILE").or_else(|_|env::var("HOME")).unwrap_or_else(|_|".".to_string());
     PathBuf::from(home).join(".webcodex")
+}
+fn save_max_turns(value:usize)->Result<(),String>{
+    let directory=home();
+    fs::create_dir_all(&directory).map_err(err)?;
+    let path=directory.join("config.json");
+    let mut config:Value=match fs::read(&path){
+        Ok(bytes)=>serde_json::from_slice(&bytes).map_err(|e|
+            format!("Cannot update {}: invalid existing JSON: {e}",path.display())
+        )?,
+        Err(e) if e.kind()==io::ErrorKind::NotFound=>json!({}),
+        Err(e)=>return Err(err(e)),
+    };
+    let object=config.as_object_mut()
+        .ok_or_else(||format!("Cannot update {}: configuration must be a JSON object",path.display()))?;
+    object.insert("max_turns".into(),json!(value));
+    let data=serde_json::to_vec_pretty(&config).map_err(err)?;
+    fs::write(path,data).map_err(err)
 }
 fn executable(name:&str, folder:&str)->PathBuf {
     let root=Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -405,7 +422,10 @@ impl Agent {
             if let Some(parent)=path.parent(){fs::create_dir_all(parent).map_err(err)?}
             let output=if crlf{new.replace('\n',"\r\n")}else{new.into()};
             fs::write(path,output).map_err(err)?;
-            if errors.is_empty(){self.hash(&rel)?;}
+            if errors.is_empty(){
+                self.hash(&rel)?;
+                feedback.push(format!("EDIT APPLIED {rel}"));
+            }
             else if let Some(hashes)=self.state["sent_hash"].as_object_mut(){hashes.remove(&rel);}
         }
         for rel in strings(&parsed["deletes"]){
@@ -417,6 +437,7 @@ impl Agent {
             self.backup(&backup,&rel,true,&mut manifest)?;
             fs::remove_file(path).map_err(err)?;
             if let Some(map)=self.state["sent_hash"].as_object_mut(){map.remove(&rel);}
+            feedback.push(format!("DELETE APPLIED {rel}"));
         }
         if !manifest.is_empty(){
             fs::create_dir_all(&backup).map_err(err)?;
@@ -431,8 +452,16 @@ impl Agent {
             if found{feedback.push("The files you requested are included below.".into())}
         }
         for cmd in strings(&parsed["runs"]){
-            if !self.allow_run {self.ui.event("activity",&format!("Skipped shell command: {cmd}"));continue}
-            if !self.approve_never && !self.ui.confirm(&format!("Run: {cmd}?"),false)?{self.note(format!("The user declined to run: {cmd}"));continue}
+            if !self.allow_run {
+                self.ui.event("activity",&format!("Skipped shell command: {cmd}"));
+                feedback.push(format!("RUN BLOCKED `{cmd}`: shell execution is disabled. Do not retry this command unless the user enables shell execution."));
+                continue;
+            }
+            if !self.approve_never && !self.ui.confirm(&format!("Run: {cmd}?"),false)?{
+                self.note(format!("The user declined to run: {cmd}"));
+                feedback.push(format!("RUN DECLINED `{cmd}`: user denied approval. Do not retry without a new user instruction."));
+                continue;
+            }
             if self.ui.approval_all{self.yes=true;self.approve_never=true;}
             self.ui.event("activity",&format!("Run {cmd}"));
             let result=self.worker("run",json!({"root":self.root.to_string_lossy(),"command":cmd,"timeout":120}))?;
@@ -451,13 +480,35 @@ impl Agent {
         }
         let mut prompt=self.message(Some(task),&[],&[])?;
         if self.state["handoff"].is_string() {self.state.as_object_mut().map(|v|v.remove("handoff"));}
+        let mut completed=false;
+        let mut idle_responses=0usize;
         for turn in 0..self.max_turns {
             let state_dir=self.root.join(".webcodex");fs::create_dir_all(&state_dir).map_err(err)?;
             fs::write(state_dir.join("last_prompt.txt"),&prompt).map_err(err)?;
             self.ui.event("activity",&format!("Working · turn {}/{}",turn+1,self.max_turns));
-            let answer=self.browser.call(json!({"op":"send","text":prompt}),Some(&mut self.ui))?;
+            let answer=match self.browser.call(json!({"op":"send","text":prompt}),Some(&mut self.ui)){
+                Ok(result)=>result,
+                Err(send_error)=>{
+                    self.ui.event("activity","Browser response interrupted. Attempting read-only recovery without resending.");
+                    match self.browser.call(json!({"op":"recover"}),Some(&mut self.ui)){
+                        Ok(result)=>{
+                            self.ui.event("activity","Recovered the interrupted ChatGPT response.");
+                            result
+                        },
+                        Err(recovery_error)=>{
+                            self.ui.event("error",&format!(
+                                "Browser request interrupted: {send_error}\nRecovery unavailable: {recovery_error}\nThe pending prompt remains in .webcodex/last_prompt.txt. Submission status is uncertain; WebCodex did not resend it."
+                            ));
+                            return Err("Task interrupted by browser transport; automatic resend disabled.".into());
+                        }
+                    }
+                }
+            };
             let reply=answer["text"].as_str().ok_or("missing browser response")?;
-            if reply.trim().is_empty(){break}
+            if reply.trim().is_empty(){
+                self.ui.event("error","ChatGPT returned an empty response; task completion is not confirmed.");
+                break;
+            }
             self.log("assistant",reply)?;
             let _=self.persist();
             let display=clean_reply(reply);
@@ -467,9 +518,39 @@ impl Agent {
                 // The plain terminal already received live streamed text.
                 self.ui.event("assistant",&display);
             }
+            let signal=agent_signal(reply);
             let (feedback,pins)=self.handle_reply(reply)?;
-            if feedback.is_empty(){break}
-            prompt=self.message(None,&pins,&feedback)?;
+            if !feedback.is_empty(){
+                idle_responses=0;
+                prompt=self.message(None,&pins,&feedback)?;
+                continue;
+            }
+            match signal {
+                Some("done")=>{
+                    completed=true;
+                    self.ui.event("activity","Task completed.");
+                    break;
+                },
+                Some("blocked")=>{
+                    completed=true;
+                    self.ui.event("system","Task blocked: external input is required before work can continue.");
+                    break;
+                },
+                _=>{
+                    idle_responses+=1;
+                    if idle_responses>=3 {
+                        self.ui.event("error","Three responses without progress or completion. Pausing to prevent an infinite loop.");
+                        break;
+                    }
+                    self.ui.event("activity","Checking remaining work automatically.");
+                    prompt=self.message(None,&[],&[
+                        "Continue the current task. Implement and verify remaining work without repeating completed actions. Output DONE: only when finished, or BLOCKED: if external input is essential.".to_string()
+                    ])?;
+                }
+            }
+        }
+        if !completed {
+            self.ui.event("error","Agent stopped without confirmed completion. Check the last response and any reported errors.");
         }
         self.persist()?;Ok(())
     }
@@ -477,7 +558,70 @@ impl Agent {
         match command.split_whitespace().next().unwrap_or(""){
             "/quit"|"/exit"|"/q"=>return Ok(false),
             "/help"=>self.ui.event("system",HELP),
-            "/status"=>self.ui.event("system",&format!("project: {}\nthread: {}\nauto apply: {}\nrun commands: {}\napproval never: {}",self.root.display(),self.thread.as_deref().unwrap_or("new"),self.yes,self.allow_run,self.approve_never)),
+            "/settings"=>{
+                self.ui.event("settings",&json!({
+                    "auto_apply":self.yes,
+                    "allow_run":self.allow_run,
+                    "approval_never":self.approve_never,
+                    "max_turns":self.max_turns
+                }).to_string());
+            },
+            "/permissions"=>{
+                let args:Vec<&str>=command.split_whitespace().collect();
+                if args.len()==1 {
+                    self.ui.event("system",&format!(
+                        "Permissions\n\nFile editing: {}\nShell commands: {}\nApproval prompts: {}\n\nCommands:\n/permissions ask\n/permissions auto\n/permissions commands-on\n/permissions commands-off\n\nAuto mode grants WebCodex broad access to files and shell commands. No operating-system sandbox is provided.",
+                        if self.yes {"automatic"}else{"ask first"},
+                        if self.allow_run {"enabled"}else{"disabled"},
+                        if self.approve_never {"disabled"}else{"enabled"}
+                    ));
+                }else{
+                    match args.as_slice(){
+                        [_, "ask"]=>{
+                            self.yes=false;
+                            self.approve_never=false;
+                            self.ui.event("system","Permissions: ask before file edits and permitted shell commands.");
+                        },
+                        [_, "auto"]=>{
+                            self.yes=true;
+                            self.allow_run=true;
+                            self.approve_never=true;
+                            self.ui.event("system","Permissions: automatic file edits and shell execution. WARNING: No OS sandbox is provided.");
+                        },
+                        [_, "commands-on"]=>{
+                            self.allow_run=true;
+                            self.ui.event("system","Shell execution enabled. Approval policy remains unchanged.");
+                        },
+                        [_, "commands-off"]=>{
+                            self.allow_run=false;
+                            self.ui.event("system","Shell execution disabled.");
+                        },
+                        _=>self.ui.event("error","Usage: /permissions [ask|auto|commands-on|commands-off]"),
+                    }
+                }
+            },
+            "/turns"=>{
+                let args:Vec<&str>=command.split_whitespace().collect();
+                match args.as_slice(){
+                    [_]=>self.ui.event("system",&format!("Maximum automatic turns per task: {}",self.max_turns)),
+                    [_,value]=>{
+                        match value.parse::<usize>(){
+                            Ok(n) if (1..=1000).contains(&n)=>{
+                                match save_max_turns(n){
+                                    Ok(())=>{
+                                        self.max_turns=n;
+                                        self.ui.event("system",&format!("Maximum automatic turns per task set to {n} and saved for future sessions."));
+                                    },
+                                    Err(e)=>self.ui.event("error",&format!("Could not save turn limit: {e}")),
+                                }
+                            },
+                            _=>self.ui.event("error","Usage: /turns <1-1000>"),
+                        }
+                    },
+                    _=>self.ui.event("error","Usage: /turns <1-1000>"),
+                }
+            },
+            "/status"=>self.ui.event("system",&format!("project: {}\nthread: {}\nauto apply: {}\nrun commands: {}\napproval never: {}\nmax turns per task: {}",self.root.display(),self.thread.as_deref().unwrap_or("new"),self.yes,self.allow_run,self.approve_never,self.max_turns)),
             "/chat"=>{let url=self.browser.call(json!({"op":"current_url"}),None)?;self.ui.event("system",url["url"].as_str().unwrap_or("No chat URL yet"))},
             "/files"=>{let scan=self.scan()?;let entries=scan["entries"].clone();let mut names=Vec::new();if let Some(entries)=entries.as_object(){for k in entries.keys(){names.push(k.clone());}}self.ui.event("system",&names.join("\n"))},
             "/yes"=>{self.yes=!self.yes;self.ui.event("system",&format!("auto apply: {}",self.yes))},
@@ -500,6 +644,29 @@ impl Agent {
         }
         Ok(true)
     }
+}
+fn agent_signal(reply:&str)->Option<&'static str>{
+    let mut fence:Option<(char,usize)>=None;
+    for line in reply.lines(){
+        let line=line.trim();
+        let marker=line.chars().next().unwrap_or(' ');
+        let count=if marker=='`'||marker=='~'{
+            line.chars().take_while(|c|*c==marker).count()
+        }else{0};
+        if let Some((opened,length))=fence {
+            if marker==opened && count>=length && line[count..].trim().is_empty(){
+                fence=None;
+            }
+            continue;
+        }
+        if count>=3 {
+            fence=Some((marker,count));
+            continue;
+        }
+        if line.starts_with("DONE:"){return Some("done");}
+        if line.starts_with("BLOCKED:"){return Some("blocked");}
+    }
+    None
 }
 fn fresh_state()->Value{json!({"started":false,"sent_hash":{},"sent_paths":[],"not_sent":[],"notes":[]})}
 fn tail(s:&str,n:usize)->String{if s.len()<=n{return s.into()}let mut begin=s.len()-n;while !s.is_char_boundary(begin){begin+=1}format!("...(truncated)...\n{}",&s[begin..])}
@@ -703,7 +870,7 @@ fn run()->Result<(),String>{
         }
     }
     let cfg:Value=fs::read(home().join("config.json")).ok().and_then(|v|serde_json::from_slice(&v).ok()).unwrap_or(Value::Null);
-    let max_turns=o.max_turns.unwrap_or(cfg["max_turns"].as_u64().unwrap_or(6) as usize);
+    let max_turns=o.max_turns.unwrap_or(cfg["max_turns"].as_u64().unwrap_or(100) as usize).clamp(1,1000);
     let max_chars=o.max_chars.unwrap_or(cfg["max_chars"].as_u64().unwrap_or(60000) as usize);
     let mut agent=Agent{root,db,worker,browser,ui,thread,state,yes:o.yes||o.approve_never,
         allow_run:o.allow_run,approve_never:o.approve_never,max_turns,max_chars,
@@ -755,5 +922,15 @@ fn main(){if let Err(e)=run(){eprintln!("WebCodex Rust agent error: {e}");std::p
         }
     }
     #[test]fn initial_state_is_compatible(){let v=fresh_state();assert!(v["sent_hash"].is_object());assert_eq!(v["started"],false);}
+    #[test]fn explicit_completion_signals(){
+        assert_eq!(agent_signal("Verified.\nDONE: Implementation finished."),Some("done"));
+        assert_eq!(agent_signal("BLOCKED: Authentication required."),Some("blocked"));
+        assert_eq!(agent_signal("Still working."),None);
+    }
+    #[test]fn ignores_signals_inside_code_fences(){
+        let fence="`".repeat(4);
+        let reply=format!("Example:\n{fence}\nDONE: Not a real signal\n{fence}\nStill working");
+        assert_eq!(agent_signal(&reply),None);
+    }
 
 }

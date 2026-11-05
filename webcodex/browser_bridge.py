@@ -81,6 +81,11 @@ def main():
                         emit({'kind': 'update', 'text': text})
                     answer = transport.send(request['text'], on_update=on_update)
                     result = {'ok': True, 'text': answer}
+                elif op == 'recover':
+                    def on_update(text):
+                        emit({'kind': 'update', 'text': text})
+                    answer = transport.recover(on_update=on_update)
+                    result = {'ok': True, 'text': answer}
                 else:
                     raise ValueError(f'unknown browser operation: {op}')
             emit({'kind': 'result', **result})

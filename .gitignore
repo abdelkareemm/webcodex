@@ -25,7 +25,7 @@ ENV/
 # Rust build artifacts
 target/
 **/target/
-rust-core/target-update/
+**/target-*/
 *.pdb
 *.rlib
 *.rmeta
