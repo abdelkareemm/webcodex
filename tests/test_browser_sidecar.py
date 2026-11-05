@@ -13,7 +13,9 @@ class FakeBrowser:
         self.config = config
     def start(self): pass
     def close(self): pass
-    def send(self, text, on_update=None):
+    def send(self, text, on_update=None, cancelled=None):
+        if cancelled is not None and cancelled():
+            raise RuntimeError("Cancelled before submission")
         on_update("first")
         on_update("first and second")
         return "first and second"

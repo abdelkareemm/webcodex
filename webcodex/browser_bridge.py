@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import sys
+import queue
+import threading
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -38,10 +40,32 @@ def emit(message):
 def main():
     configure_pipe_encoding()
     transport = None
-    for raw in sys.stdin:
+    requests = queue.Queue()
+    cancelled = threading.Event()
+
+    def read_requests():
+        for raw in sys.stdin:
+            try:
+                request = json.loads(raw)
+                if request.get('op') == 'cancel':
+                    cancelled.set()
+                else:
+                    if request.get('op') in ('send', 'recover'):
+                        cancelled.clear()
+                    requests.put(request)
+            except BaseException as exc:
+                requests.put({'op': '_read_error', 'error': f'{type(exc).__name__}: {exc}'})
+        requests.put({'op': '_eof'})
+
+    threading.Thread(target=read_requests, daemon=True).start()
+    while True:
+        request = requests.get()
+        op = request.get('op')
+        if op == '_eof':
+            break
         try:
-            request = json.loads(raw)
-            op = request.get('op')
+            if op == '_read_error':
+                raise ValueError(request['error'])
             with redirect_stdout(sys.stderr):
                 if op == 'start':
                     if transport is not None:
@@ -79,18 +103,23 @@ def main():
                 elif op == 'send':
                     def on_update(text):
                         emit({'kind': 'update', 'text': text})
-                    answer = transport.send(request['text'], on_update=on_update)
+                    answer = transport.send(request['text'], on_update=on_update, cancelled=cancelled.is_set)
                     result = {'ok': True, 'text': answer}
                 elif op == 'recover':
                     def on_update(text):
                         emit({'kind': 'update', 'text': text})
-                    answer = transport.recover(on_update=on_update)
+                    answer = transport.recover(on_update=on_update, cancelled=cancelled.is_set)
                     result = {'ok': True, 'text': answer}
                 else:
                     raise ValueError(f'unknown browser operation: {op}')
             emit({'kind': 'result', **result})
         except BaseException as exc:
-            emit({'kind': 'result', 'ok': False, 'error': f'{type(exc).__name__}: {exc}'})
+            emit({
+                'kind': 'result',
+                'ok': False,
+                'cancelled': type(exc).__name__ == 'TransportCancelled',
+                'error': f'{type(exc).__name__}: {exc}',
+            })
     if transport is not None:
         transport.close()
     return 0

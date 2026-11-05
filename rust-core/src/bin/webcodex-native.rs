@@ -4,7 +4,7 @@
 use serde_json::{json,Value};
 #[path="webcodex-native/codex_import.rs"] mod codex_import;
 #[path="webcodex-native/picker.rs"] mod picker;
-use std::{collections::{BTreeMap},env,fs,io::{self,BufRead,BufReader,Write,IsTerminal},net::{TcpListener,TcpStream},path::{Component,Path,PathBuf},process::{Child,ChildStdin,ChildStdout,Command,Stdio},sync::mpsc,time::Duration};
+use std::{collections::{BTreeMap},env,fs,io::{self,BufRead,BufReader,Write,IsTerminal},net::{TcpListener,TcpStream},path::{Component,Path,PathBuf},process::{Child,ChildStdin,ChildStdout,Command,Stdio},sync::{mpsc,Arc,Mutex,atomic::{AtomicBool,Ordering}},time::Duration};
 
 const PROTOCOL:&str=include_str!("../../assets/protocol.txt");
 const REMINDER:&str=include_str!("../../assets/reminder.txt");
@@ -52,17 +52,19 @@ fn tui_executable()->PathBuf {
     }
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../rust-tui/target/release").join(name)
 }
-struct JsonChild {child:Child,stdin:ChildStdin,stdout:BufReader<ChildStdout>}
+struct JsonChild {child:Child,stdin:Arc<Mutex<ChildStdin>>,stdout:BufReader<ChildStdout>}
 impl JsonChild {
     fn spawn(mut command:Command)->Result<Self,String> {
         let mut child=command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(err)?;
         let stdin=child.stdin.take().ok_or("missing process stdin")?;
         let stdout=BufReader::new(child.stdout.take().ok_or("missing process stdout")?);
-        Ok(Self{child,stdin,stdout})
+        Ok(Self{child,stdin:Arc::new(Mutex::new(stdin)),stdout})
     }
     fn send(&mut self,request:&Value)->Result<(),String>{
-        serde_json::to_writer(&mut self.stdin,request).map_err(err)?;
-        self.stdin.write_all(b"\n").map_err(err)?;self.stdin.flush().map_err(err)
+        let mut stdin=self.stdin.lock().map_err(err)?;
+        serde_json::to_writer(&mut *stdin,request).map_err(err)?;
+        stdin.write_all(b"\n").map_err(err)?;
+        stdin.flush().map_err(err)
     }
     fn receive(&mut self)->Result<Value,String>{
         let mut line=String::new();if self.stdout.read_line(&mut line).map_err(err)?==0{return Err("subprocess closed IPC stream".into())}
@@ -76,7 +78,9 @@ impl JsonChild {
 impl Drop for JsonChild {fn drop(&mut self){let _=self.child.kill();let _=self.child.wait();}}
 
 struct Ui {
-    socket:Option<TcpStream>,reader:Option<BufReader<TcpStream>>,process:Option<Child>,approval_all:bool,
+    socket:Option<TcpStream>,reader:Option<mpsc::Receiver<Value>>,process:Option<Child>,approval_all:bool,
+    cancelled:Arc<AtomicBool>,
+    browser_input:Arc<Mutex<Option<Arc<Mutex<ChildStdin>>>>>,
 }
 impl Ui {
     fn new(root:&Path,plain:bool)->Self {
@@ -98,7 +102,40 @@ impl Ui {
                             let _=socket.set_nodelay(true);
                             if let Ok(copy)=socket.try_clone() {
                                 let _=copy.set_nonblocking(false);
-                                return Self{socket:Some(socket),reader:Some(BufReader::new(copy)),process:Some(process),approval_all:false};
+                                let cancelled=Arc::new(AtomicBool::new(false));
+                                let browser_input:Arc<Mutex<Option<Arc<Mutex<ChildStdin>>>>>=Arc::new(Mutex::new(None));
+                                let thread_cancelled=Arc::clone(&cancelled);
+                                let thread_input=Arc::clone(&browser_input);
+                                let (tx,rx)=mpsc::channel();
+                                std::thread::spawn(move || {
+                                    let mut reader=BufReader::new(copy);
+                                    loop {
+                                        let mut line=String::new();
+                                        match reader.read_line(&mut line) {
+                                            Ok(0)=>break,
+                                            Ok(_)=>{},
+                                            Err(e) if e.kind()==io::ErrorKind::WouldBlock || e.kind()==io::ErrorKind::Interrupted => {
+                                                std::thread::sleep(Duration::from_millis(15));
+                                                continue;
+                                            },
+                                            Err(_)=>break,
+                                        }
+                                        let Ok(message)=serde_json::from_str::<Value>(&line) else {continue};
+                                        if message["kind"]=="cancel" {
+                                            thread_cancelled.store(true,Ordering::SeqCst);
+                                            if let Ok(guard)=thread_input.lock() {
+                                                if let Some(stdin)=guard.as_ref() {
+                                                    if let Ok(mut writer)=stdin.lock() {
+                                                        let _=writer.write_all(b"{\"op\":\"cancel\"}\n");
+                                                        let _=writer.flush();
+                                                    }
+                                                }
+                                            }
+                                        }else if tx.send(message).is_err(){break;}
+                                    }
+                                });
+                                return Self{socket:Some(socket),reader:Some(rx),process:Some(process),
+                                    approval_all:false,cancelled,browser_input};
                             }
                         }
                     }
@@ -106,7 +143,9 @@ impl Ui {
                 }
             }
         }
-        Self{socket:None,reader:None,process:None,approval_all:false}
+        Self{socket:None,reader:None,process:None,approval_all:false,
+            cancelled:Arc::new(AtomicBool::new(false)),
+            browser_input:Arc::new(Mutex::new(None))}
     }
     fn event(&mut self,kind:&str,body:&str){
         if let Some(s)=self.socket.as_mut(){
@@ -129,18 +168,8 @@ impl Ui {
         }
     }
     fn receive(&mut self)->Result<Option<String>,String>{
-        if let Some(reader)=self.reader.as_mut(){
-            let mut line=String::new();
-            loop {
-                match reader.read_line(&mut line) {
-                    Ok(0)=>return Ok(None), Ok(_)=>break,
-                    Err(e) if e.kind()==io::ErrorKind::WouldBlock || e.kind()==io::ErrorKind::Interrupted => {
-                        std::thread::sleep(Duration::from_millis(15));
-                    },
-                    Err(e)=>return Err(err(e)),
-                }
-            }
-            let v:Value=serde_json::from_str(&line).map_err(err)?;
+        if let Some(reader)=self.reader.as_ref(){
+            let v=reader.recv().map_err(|_|"TUI disconnected".to_string())?;
             if v["kind"]=="exit" {return Ok(None)}
             if v["kind"]=="task" {return Ok(Some(v["body"].as_str().unwrap_or("").to_string()))}
             return Ok(Some(String::new()));
@@ -153,17 +182,15 @@ impl Ui {
         if self.socket.is_some(){
             self.event("approve",question);
             loop{
-                let mut line=String::new();
-                let Some(reader)=self.reader.as_mut() else{return Err("TUI disconnected".into())};
-                match reader.read_line(&mut line) {
-                    Ok(0)=>return Err("TUI disconnected".into()),
-                    Ok(_)=>{},
-                    Err(e) if e.kind()==io::ErrorKind::WouldBlock || e.kind()==io::ErrorKind::Interrupted => {
-                        std::thread::sleep(Duration::from_millis(15));continue;
-                    },
-                    Err(e)=>return Err(err(e)),
+                if self.cancelled.load(Ordering::SeqCst) {
+                    return Err("Task cancelled during approval".into());
                 }
-                let val:Value=serde_json::from_str(&line).map_err(err)?;
+                let Some(reader)=self.reader.as_ref() else{return Err("TUI disconnected".into())};
+                let val=match reader.recv_timeout(Duration::from_millis(100)) {
+                    Ok(value)=>value,
+                    Err(mpsc::RecvTimeoutError::Timeout)=>continue,
+                    Err(mpsc::RecvTimeoutError::Disconnected)=>return Err("TUI disconnected".into()),
+                };
                 if val["kind"]=="approve"{
                     if val["body"]=="a"{self.approval_all=true;}
                     return Ok(matches!(val["body"].as_str(),Some("y"|"a")))
@@ -397,6 +424,9 @@ impl Agent {
         manifest.entry(kind.into()).or_default().push(rel.into());Ok(())
     }
     fn handle_reply(&mut self,reply:&str)->Result<(Vec<String>,Vec<String>),String>{
+        if self.ui.cancelled.load(Ordering::SeqCst) {
+            return Err("Task cancelled before applying reply".into());
+        }
         let parsed=self.worker("parse_reply",json!({"text":reply}))?;
         let parse_errors=strings(&parsed["errors"]);
         if !parse_errors.is_empty(){
@@ -412,6 +442,9 @@ impl Agent {
             if let Some(path)=block["path"].as_str(){grouped.entry(path.into()).or_default().push(block.clone())}
         }
         for (rel,blocks) in grouped {
+            if self.ui.cancelled.load(Ordering::SeqCst) {
+                return Err("Task cancelled during file edits".into());
+            }
             let path=match self.validate_path(&rel){Ok(p)=>p,Err(e)=>{feedback.push(format!("EDIT REJECTED {rel}: {e}"));continue}};
             let raw=if path.exists(){match fs::read(&path){Ok(v)=>Some(v),Err(e)=>{feedback.push(format!("EDIT FAILED {rel}: {e}"));continue}}}else{None};
             let crlf=raw.as_ref().is_some_and(|v|v.windows(2).any(|v|v==b"\r\n"));
@@ -429,6 +462,9 @@ impl Agent {
             if !self.yes && !self.ui.confirm(&format!("Apply changes to {rel}?"),true)?{
                 self.note(format!("The user REJECTED your edit to {rel}; the file is unchanged."));continue;
             }
+            if self.ui.cancelled.load(Ordering::SeqCst) {
+                return Err("Task cancelled before writing file".into());
+            }
             if self.ui.approval_all{self.yes=true;self.approve_never=true;}
             self.backup(&backup,&rel,false,&mut manifest)?;
             if let Some(parent)=path.parent(){fs::create_dir_all(parent).map_err(err)?}
@@ -441,10 +477,16 @@ impl Agent {
             else if let Some(hashes)=self.state["sent_hash"].as_object_mut(){hashes.remove(&rel);}
         }
         for rel in strings(&parsed["deletes"]){
+            if self.ui.cancelled.load(Ordering::SeqCst) {
+                return Err("Task cancelled before deleting file".into());
+            }
             let path=match self.validate_path(&rel){Ok(p)=>p,Err(e)=>{feedback.push(format!("DELETE REJECTED {rel}: {e}"));continue}};
             if !path.is_file(){feedback.push(format!("DELETE FAILED {rel}: no such file"));continue}
             self.ui.event("activity",&format!("Delete {rel}"));
             if !self.yes && !self.ui.confirm(&format!("Delete {rel}?"),true)?{self.note(format!("The user REJECTED deleting {rel}."));continue}
+            if self.ui.cancelled.load(Ordering::SeqCst) {
+                return Err("Task cancelled before deleting file".into());
+            }
             if self.ui.approval_all{self.yes=true;self.approve_never=true;}
             self.backup(&backup,&rel,true,&mut manifest)?;
             fs::remove_file(path).map_err(err)?;
@@ -464,6 +506,9 @@ impl Agent {
             if found{feedback.push("The files you requested are included below.".into())}
         }
         for cmd in strings(&parsed["runs"]){
+            if self.ui.cancelled.load(Ordering::SeqCst) {
+                return Err("Task cancelled before shell command".into());
+            }
             if !self.allow_run {
                 self.ui.event("activity",&format!("Skipped shell command: {cmd}"));
                 feedback.push(format!("RUN BLOCKED `{cmd}`: shell execution is disabled. Do not retry this command unless the user enables shell execution."));
@@ -484,6 +529,7 @@ impl Agent {
         Ok((feedback,pins))
     }
     fn task(&mut self,task:&str)->Result<(),String>{
+        self.ui.cancelled.store(false,Ordering::SeqCst);
         self.log("user",task)?;
         // A read-only imported Codex transcript is presented as a bounded handoff
         // exactly once when the user sends the first task to the new ChatGPT chat.
@@ -493,14 +539,23 @@ impl Agent {
         let mut prompt=self.message(Some(task),&[],&[])?;
         if self.state["handoff"].is_string() {self.state.as_object_mut().map(|v|v.remove("handoff"));}
         let mut completed=false;
-        let mut idle_responses=0usize;
+        let mut last_feedback:Option<(Vec<String>,Vec<String>)>=None;
         for turn in 0..self.max_turns {
+            if self.ui.cancelled.load(Ordering::SeqCst) {
+                self.ui.event("system","Task cancelled. Ready for another message.");
+                return Ok(());
+            }
             let state_dir=self.root.join(".webcodex");fs::create_dir_all(&state_dir).map_err(err)?;
             fs::write(state_dir.join("last_prompt.txt"),&prompt).map_err(err)?;
             self.ui.event("activity",&format!("Working · turn {}/{}",turn+1,self.max_turns));
             let answer=match self.browser.call(json!({"op":"send","text":prompt}),Some(&mut self.ui)){
                 Ok(result)=>result,
                 Err(send_error)=>{
+                    if self.ui.cancelled.load(Ordering::SeqCst) {
+                        self.ui.event("stream_end","");
+                        self.ui.event("system","Task cancelled. Ready for another message.");
+                        return Ok(());
+                    }
                     self.ui.event("activity","Browser response interrupted. Attempting read-only recovery without resending.");
                     match self.browser.call(json!({"op":"recover"}),Some(&mut self.ui)){
                         Ok(result)=>{
@@ -516,6 +571,11 @@ impl Agent {
                     }
                 }
             };
+            if self.ui.cancelled.load(Ordering::SeqCst) {
+                self.ui.event("stream_end","");
+                self.ui.event("system","Task cancelled. Ready for another message.");
+                return Ok(());
+            }
             let reply=answer["text"].as_str().ok_or("missing browser response")?;
             if reply.trim().is_empty(){
                 self.ui.event("error","ChatGPT returned an empty response; task completion is not confirmed.");
@@ -532,34 +592,26 @@ impl Agent {
             }
             let signal=agent_signal(reply);
             let (feedback,pins)=self.handle_reply(reply)?;
-            if !feedback.is_empty(){
-                idle_responses=0;
-                prompt=self.message(None,&pins,&feedback)?;
-                continue;
+            if signal==Some("done"){
+                completed=true;
+                self.ui.event("activity","Task completed.");
+                break;
             }
-            match signal {
-                Some("done")=>{
-                    completed=true;
-                    self.ui.event("activity","Task completed.");
-                    break;
-                },
-                Some("blocked")=>{
-                    completed=true;
-                    self.ui.event("system","Task blocked: external input is required before work can continue.");
-                    break;
-                },
-                _=>{
-                    idle_responses+=1;
-                    if idle_responses>=3 {
-                        self.ui.event("error","Three responses without progress or completion. Pausing to prevent an infinite loop.");
-                        break;
-                    }
-                    self.ui.event("activity","Checking remaining work automatically.");
-                    prompt=self.message(None,&[],&[
-                        "Continue the current task. Implement and verify remaining work without repeating completed actions. Output DONE: only when finished, or BLOCKED: if external input is essential.".to_string()
-                    ])?;
-                }
+            if signal==Some("blocked"){
+                completed=true;
+                self.ui.event("system","Task blocked: external input is required before work can continue.");
+                break;
             }
+            if feedback.is_empty(){
+                self.ui.event("system","Paused: no actionable edits, commands, or file requests. Enter another message to continue.");
+                break;
+            }
+            if last_feedback.as_ref()==Some(&(feedback.clone(),pins.clone())){
+                self.ui.event("error","Repeated identical tool feedback. Pausing to prevent an automatic prompt loop.");
+                break;
+            }
+            last_feedback=Some((feedback.clone(),pins.clone()));
+            prompt=self.message(None,&pins,&feedback)?;
         }
         if !completed {
             self.ui.event("error","Agent stopped without confirmed completion. Check the last response and any reported errors.");
@@ -999,6 +1051,7 @@ fn run()->Result<(),String>{
     let mut ui=Ui::new(&root,o.plain||o.login);
     ui.event("status","Starting browser transport…");
     let mut browser=Browser::spawn(Value::Object(config),&mut ui)?;
+    *ui.browser_input.lock().map_err(err)?=Some(Arc::clone(&browser.child.stdin));
     if o.login{
         let result=browser.call(json!({"op":"login"}),None)?;
         if result["ok"]==true{println!("WebCodex browser login successful.");return Ok(())}

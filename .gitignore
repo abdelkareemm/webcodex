@@ -26,6 +26,7 @@ ENV/
 target/
 **/target/
 **/target-*/
+build-test/
 *.pdb
 *.rlib
 *.rmeta

@@ -2,7 +2,7 @@
 //! WebCodex's existing Python browser transport remains the execution engine.
 use std::{env, io::{self, BufRead, BufReader, Write}, net::{TcpStream, SocketAddr}, sync::mpsc::{self, Receiver}, thread, time::Duration};
 use crossterm::{event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind}, execute, terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen}};
-use ratatui::{backend::CrosstermBackend, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style}, text::{Line, Span, Text}, widgets::{Block, Borders, Clear, Paragraph, Wrap, Scrollbar, ScrollbarOrientation, ScrollbarState}, Terminal};
+use ratatui::{backend::CrosstermBackend, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style}, text::{Line, Span, Text}, widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap, Scrollbar, ScrollbarOrientation, ScrollbarState}, Terminal};
 use serde::{Deserialize, Serialize};
 use unicode_width::UnicodeWidthChar;
 
@@ -439,7 +439,7 @@ fn composer_visual_rows(draft:&str, width:usize)->Vec<String> {
 }
 
 fn composer_height(draft:&str, terminal_width:u16, terminal_height:u16)->u16 {
-    let content_width=terminal_width.saturating_sub(2).max(1) as usize;
+    let content_width=terminal_width.saturating_sub(3).max(1) as usize;
     let mut rows=0usize;
 
     for (index,line) in draft.split('\n').enumerate() {
@@ -584,8 +584,8 @@ fn render(f: &mut ratatui::Frame,app: &mut App) {
     }
     let busy=if app.busy {"● Working…"} else if !app.ready {&app.status} else {""};
     f.render_widget(Paragraph::new(Span::styled(format!("  {busy}"),theme_muted())),rows[2]);
-    let border=Block::default().borders(Borders::ALL).border_style(theme_muted());
-    let editor_width=rows[3].width.saturating_sub(2).max(1) as usize;
+    let border=Block::default().borders(Borders::ALL).padding(Padding::left(1)).border_style(theme_muted());
+    let editor_width=rows[3].width.saturating_sub(3).max(1) as usize;
     let (cursor_row,cursor_col)=composer_cursor_position(&app.draft,app.cursor,editor_width);
     let visible_rows=rows[3].height.saturating_sub(2).max(1) as usize;
     let scroll_offset=cursor_row.saturating_sub(visible_rows.saturating_sub(1));
@@ -596,7 +596,7 @@ fn render(f: &mut ratatui::Frame,app: &mut App) {
     // Keep the editor cursor inside the visible input viewport.
     let visible_row=cursor_row.saturating_sub(scroll_offset);
     let y=rows[3].y.saturating_add(1).saturating_add(visible_row as u16);
-    let x=rows[3].x.saturating_add(1).saturating_add(cursor_col as u16);
+    let x=rows[3].x.saturating_add(2).saturating_add(cursor_col as u16);
     if y<rows[3].bottom().saturating_sub(1)
         && x<rows[3].right().saturating_sub(1) {
         f.set_cursor_position((x,y));
@@ -912,6 +912,17 @@ fn loop_ui(terminal:&mut Terminal<CrosstermBackend<io::Stdout>>, sock:&mut TcpSt
                 // Windows Terminal reports press/repeat/release independently.
                 // Release events were being inserted as duplicate characters.
                 if kind == KeyEventKind::Release {continue;}
+                if code==KeyCode::Char('c') && modifiers.contains(KeyModifiers::CONTROL) {
+                    if app.busy {
+                        send(sock,"cancel","")?;
+                        app.approval=None;
+                        app.status="Cancelling active task...".into();
+                    }else{
+                        send(sock,"exit","")?;
+                        break;
+                    }
+                    continue;
+                }
                 if app.approval.is_some(){
                     let ans=match code {KeyCode::Char('y')|KeyCode::Char('Y')=>Some("y"),KeyCode::Char('n')|KeyCode::Char('N')|KeyCode::Esc=>Some("n"),KeyCode::Char('a')|KeyCode::Char('A')=>Some("a"),_=>None};
                     if let Some(a)=ans {send(sock,"approve",a)?;app.approval=None;}
@@ -994,7 +1005,7 @@ fn loop_ui(terminal:&mut Terminal<CrosstermBackend<io::Stdout>>, sock:&mut TcpSt
                         let count=command_palette::search(&app.draft).len().min(7);
                         if count>0 {app.palette_index=(app.palette_index+1)%count;}
                     },
-                    KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL)=>{app.draft.clear();app.cursor=0;app.history_index=None;},
+
                     KeyCode::Char('l') if modifiers.contains(KeyModifiers::CONTROL)=>{app.entries.clear();app.transcript_dirty=true;app.jump_bottom();full_repaint=true;},
                     KeyCode::PageUp=>{app.move_scroll(-20);full_repaint=true;},KeyCode::PageDown=>{app.move_scroll(20);full_repaint=true;},
                     KeyCode::Up if modifiers.contains(KeyModifiers::CONTROL)=>{app.move_scroll(-4);full_repaint=true;},

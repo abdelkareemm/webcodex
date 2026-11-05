@@ -20,6 +20,10 @@ class TransportError(Exception):
     pass
 
 
+class TransportCancelled(TransportError):
+    pass
+
+
 # Walks the DOM of the assistant message(s) and rebuilds markdown-ish text.
 # Code blocks are emitted verbatim inside ```` fences (exact whitespace preserved).
 EXTRACT_JS = r"""
@@ -123,6 +127,13 @@ class BrowserTransport:
         self._ctx = None
         self.page = None
         self._pending_reply = None
+        self._cancelled = None
+
+    def _check_cancel(self):
+        if self._cancelled is not None and self._cancelled():
+            self._stop_generation()
+            self._pending_reply = None
+            raise TransportCancelled("Cancelled by user")
 
     # ---- lifecycle ------------------------------------------------------
     def start(self) -> None:
@@ -528,6 +539,7 @@ class BrowserTransport:
         """Click the Send button once it is there and enabled (big pastes take a moment)."""
         t0 = time.time()
         while time.time() - t0 < wait:
+            self._check_cancel()
             btn = self._first_visible("send")
             if btn is not None:
                 try:
@@ -636,9 +648,11 @@ class BrowserTransport:
             lambda: self._press("Control+Enter"),
         )
         for step in steps:
+            self._check_cancel()
             step()
             t0 = time.time()
             while time.time() - t0 < 6:
+                self._check_cancel()
                 if sent():
                     return True
                 time.sleep(0.3)
@@ -651,7 +665,9 @@ class BrowserTransport:
         )
         return False
 
-    def send(self, text: str, on_update=None) -> str:
+    def send(self, text: str, on_update=None, cancelled=None) -> str:
+        self._cancelled = cancelled
+        self._check_cancel()
         if self._pending_reply is not None:
             raise TransportError(
                 "A previous response remains unresolved. Recover it before sending another prompt."
@@ -665,9 +681,12 @@ class BrowserTransport:
         # An error after submission must not cause an automatic resend.
         answer = self._wait_reply(n0, on_update, start_timeout=None if ok else 600, s0=s0)
         self._pending_reply = None
+        self._cancelled = None
         return answer
 
-    def recover(self, on_update=None) -> str:
+    def recover(self, on_update=None, cancelled=None) -> str:
+        self._cancelled = cancelled
+        self._check_cancel()
         """Read an interrupted reply without submitting another prompt.
 
         Recovery requires a recorded response stream from the pending send.
@@ -683,6 +702,7 @@ class BrowserTransport:
             )
         answer = self._wait_reply(n0, on_update, s0=s0)
         self._pending_reply = None
+        self._cancelled = None
         return answer
 
     def _thinking_text(self) -> str:
@@ -715,6 +735,7 @@ class BrowserTransport:
         t0 = time.time()
         try:
             while time.time() - t0 < start_limit:
+                self._check_cancel()
                 if self._stream_count() > s0 or self._count() > n0 or self._streaming():
                     break
                 if self._first_visible("composer") is None:
@@ -735,6 +756,7 @@ class BrowserTransport:
             streamed = False
             deadline = time.time() + cfg.reply_timeout
             while time.time() < deadline:
+                self._check_cancel()
                 streaming = self._streaming()
                 rs, open_ = self._stream_reply(s0)
                 text = rs.text if rs is not None else ""

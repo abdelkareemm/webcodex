@@ -7,10 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $native = Join-Path $root 'rust-core\target-staging\release\webcodex-native.exe'
-$tui = Join-Path $root 'rust-tui\target-validation\release\webcodex-tui.exe'
-if (-not (Test-Path -LiteralPath $tui -PathType Leaf)) {
-    $tui = Join-Path $root 'rust-tui\target-staging\release\webcodex-tui.exe'
-}
+$tui = Join-Path $root 'rust-tui\target-staging\release\webcodex-tui.exe'
 $core = Join-Path $root 'rust-core\target-staging\release\webcodex-core.exe'
 
 if ($Help) {
