@@ -15,6 +15,8 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "/permissions commands-on", description: "Enable shell commands" },
     Command { name: "/permissions commands-off", description: "Disable shell commands" },
     Command { name: "/new", description: "Start a new conversation" },
+    Command { name: "/sessions", description: "Browse saved workspace conversations" },
+    Command { name: "/session", description: "Switch to a saved conversation by ID" },
     Command { name: "/chat", description: "Show conversation URL" },
     Command { name: "/files", description: "List project files" },
     Command { name: "/undo", description: "Undo the last file edits" },
@@ -60,6 +62,12 @@ mod tests {
     #[test]
     fn description_search() {
         assert!(search("approval").iter().any(|c| c.name == "/yes"));
+    }
+
+    #[test]
+    fn sessions_command_is_searchable() {
+        assert_eq!(search("/sessions")[0].name, "/sessions");
+        assert!(search("saved workspace").iter().any(|c| c.name == "/sessions"));
     }
 
     #[test]

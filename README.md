@@ -192,6 +192,20 @@ Headless mode hides the Playwright-controlled browser, not the WebCodex terminal
 | Ctrl+C | Clear current draft |
 | Ctrl+L | Clear visible transcript |
 | Ctrl+Q | Exit WebCodex |
+| Ctrl+K | Open the command palette |
+| Tab | Complete slash commands |
+| Esc | Close information and settings screens |
+
+### Interactive terminal screens
+
+- `/help` — keyboard shortcuts and available commands.
+- `/status` — active conversation, project and execution settings.
+- `/sessions` — browse saved conversations for the current workspace, including titles, update dates, session IDs and active-session identification.
+- `/session <id>` — switch to a saved conversation that has a valid ChatGPT URL. WebCodex restores that conversation's local agent state and recent transcript after browser navigation succeeds.
+- `/files` — scrollable list of indexed project files.
+- `/settings` — interactive permission modes and automatic turn-limit presets.
+
+These screens display actual WebCodex state. Features that require additional backend capabilities will not appear as functional controls until implemented.
 
 ## Development
 

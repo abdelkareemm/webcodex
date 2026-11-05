@@ -4,7 +4,7 @@ use serde_json::{json,Value};
 use std::{fs,io::{BufRead,BufReader},path::{Path,PathBuf},time::SystemTime};
 
 #[derive(Clone,Debug)]
-pub struct Session {pub id:String,pub path:PathBuf,pub title:String,pub cwd:String,pub modified:SystemTime}
+pub struct Session {pub id:String,pub path:PathBuf,pub title:String,pub cwd:String}
 
 pub fn codex_home(override_path:Option<&str>)->PathBuf {
     if let Some(p)=override_path {return PathBuf::from(p)}
@@ -82,9 +82,8 @@ fn preview(path:&Path)->Session {
         }
         if title.is_empty(){if let Some((role,text))=text_role(v){if role=="user" {title=text.lines().find(|s|!s.trim().is_empty()).unwrap_or("").chars().take(85).collect();}}}
     });
-    let modified=fs::metadata(path).and_then(|m|m.modified()).unwrap_or(SystemTime::UNIX_EPOCH);
     if title.is_empty(){title="(untitled Codex session)".into()}
-    Session{id,path:path.to_owned(),title,cwd,modified}
+    Session{id,path:path.to_owned(),title,cwd}
 }
 pub fn discover(home:&Path)->Vec<Session>{
     let mut paths=Vec::new();files(&home.join("sessions"),&mut paths,0);

@@ -21,9 +21,51 @@ struct SettingsView {
     approval_never: bool,
     max_turns: usize,
 }
-struct App { cached_rows: Vec<Line<'static>>, cache_width: usize, transcript_dirty: bool, entries: Vec<Entry>, draft: String, cursor: usize, scroll: u16, tail: bool, busy: bool, approval: Option<String>, settings: Option<SettingsView>, settings_index: usize, exit: bool, project: String, history: Vec<String>, history_index: Option<usize>, history_stash: String, status: String, ready: bool, max_scroll: u16, tick: u64, palette_index: usize }
+struct App { cached_rows: Vec<Line<'static>>, cache_width: usize, transcript_dirty: bool, entries: Vec<Entry>, draft: String, cursor: usize, scroll: u16, tail: bool, busy: bool, approval: Option<String>, settings: Option<SettingsView>, settings_index: usize, page: Option<PageView>, exit: bool, project: String, history: Vec<String>, history_index: Option<usize>, history_stash: String, status: String, ready: bool, max_scroll: u16, tick: u64, palette_index: usize }
+#[derive(Clone, Debug, Deserialize)]
+struct SessionChoice {
+    id: String,
+    title: String,
+    updated: String,
+    active: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct PageView {
+    title: String,
+    lines: Vec<String>,
+    #[serde(default)]
+    choices: Vec<SessionChoice>,
+    #[serde(skip)]
+    selected: usize,
+    #[serde(skip)]
+    scroll: usize,
+}
+
+impl PageView {
+    fn move_scroll(&mut self, delta: i32) {
+        self.scroll = self.scroll.saturating_add_signed(delta as isize)
+            .min(self.lines.len().saturating_sub(1));
+    }
+
+    fn select_relative(&mut self, delta: isize) {
+        if self.choices.is_empty() {
+            self.selected=0;
+            self.scroll=0;
+            return;
+        }
+        self.selected=self.selected.saturating_add_signed(delta)
+            .min(self.choices.len()-1);
+        self.scroll=self.selected;
+    }
+
+    fn selected_session_id(&self)->Option<&str>{
+        self.choices.get(self.selected).map(|choice|choice.id.as_str())
+    }
+}
+
 impl App {
-    fn new(project: String) -> Self { Self { cached_rows: Vec::new(), cache_width: 0, transcript_dirty: true, entries: vec![], draft: String::new(), cursor: 0, scroll: 0, tail: true, busy: false, approval: None, settings: None, settings_index: 0, exit: false, project, history: Vec::new(), history_index: None, history_stash: String::new(), status: "Starting WebCodex…".into(), ready: false, max_scroll: 0, tick: 0, palette_index: 0 } }
+    fn new(project: String) -> Self { Self { cached_rows: Vec::new(), cache_width: 0, transcript_dirty: true, entries: vec![], draft: String::new(), cursor: 0, scroll: 0, tail: true, busy: false, approval: None, settings: None, settings_index: 0, page: None, exit: false, project, history: Vec::new(), history_index: None, history_stash: String::new(), status: "Starting WebCodex…".into(), ready: false, max_scroll: 0, tick: 0, palette_index: 0 } }
     fn push(&mut self, kind: String, text: String) { if kind == "clear" {self.entries.clear(); self.scroll=0; self.tail=true; self.transcript_dirty=true; return} let text=if kind=="assistant" {sanitize_display(&hide_code_blocks(&text))} else {sanitize_display(&text)}; if text.is_empty() && kind=="assistant" {return;} if kind=="user" && self.history.last()!=Some(&text) {self.history.push(text.clone());}
         self.entries.push(Entry{kind,text}); self.transcript_dirty=true; if self.tail { self.scroll=u16::MAX; } }
     fn stream(&mut self, text: String) {
@@ -328,6 +370,102 @@ fn assistant_message_lines(source: &str) -> Vec<Line<'static>> {
 fn send(s: &mut TcpStream,kind: &str,body: &str) -> io::Result<()> { serde_json::to_writer(&mut *s, &Outgoing{kind,body}).map_err(io::Error::other)?; s.write_all(b"\n")?; s.flush() }
 fn theme_muted()->Style { Style::default().fg(Color::DarkGray) }
 
+fn compact_path(path:&str, max_width:usize)->String {
+    if max_width==0 {return String::new();}
+    if path.chars().count()<=max_width {return path.to_string();}
+    if max_width<=3 {return ".".repeat(max_width);}
+    let suffix=path.chars().rev().take(max_width-3).collect::<Vec<_>>();
+    format!("...{}",suffix.into_iter().rev().collect::<String>())
+}
+
+fn composer_cursor_position(draft:&str, cursor:usize, width:usize)->(usize,usize) {
+    let width=width.max(1);
+    let mut row=0usize;
+    let mut col=0usize;
+    let cursor=cursor.min(draft.len());
+    let cursor=if draft.is_char_boundary(cursor) {
+        cursor
+    } else {
+        (0..cursor).rev().find(|&i|draft.is_char_boundary(i)).unwrap_or(0)
+    };
+
+    for ch in "› ".chars().chain(draft[..cursor].chars()) {
+        if ch=='\n' {
+            row+=1;
+            col=0;
+            continue;
+        }
+        let size=UnicodeWidthChar::width(ch).unwrap_or(0);
+        if col+size>width {
+            row+=1;
+            col=0;
+        }
+        col+=size;
+        if col>=width {
+            row+=1;
+            col=0;
+        }
+    }
+    (row,col)
+}
+
+fn composer_visual_rows(draft:&str, width:usize)->Vec<String> {
+    let width=width.max(1);
+    let mut rows=Vec::new();
+    let mut current=String::new();
+    let mut col=0usize;
+
+    for ch in "› ".chars().chain(draft.chars()) {
+        if ch=='\n' {
+            rows.push(std::mem::take(&mut current));
+            col=0;
+            continue;
+        }
+        let size=UnicodeWidthChar::width(ch).unwrap_or(0);
+        if col+size>width && col>0 {
+            rows.push(std::mem::take(&mut current));
+            col=0;
+        }
+        current.push(ch);
+        col+=size;
+        if col>=width {
+            rows.push(std::mem::take(&mut current));
+            col=0;
+        }
+    }
+
+    rows.push(current);
+    rows
+}
+
+fn composer_height(draft:&str, terminal_width:u16, terminal_height:u16)->u16 {
+    let content_width=terminal_width.saturating_sub(2).max(1) as usize;
+    let mut rows=0usize;
+
+    for (index,line) in draft.split('\n').enumerate() {
+        let text_width=line.chars()
+            .map(|ch|UnicodeWidthChar::width(ch).unwrap_or(0))
+            .sum::<usize>()
+            + if index==0 {2}else{0};
+        rows+=text_width.saturating_sub(1)/content_width+1;
+    }
+
+    let maximum=terminal_height.saturating_sub(8).clamp(4,12);
+    rows.saturating_add(2).clamp(4,maximum as usize) as u16
+}
+
+fn header_lines(project:&str, width:usize, busy:bool, ready:bool)->Text<'static> {
+    let state=if busy {"WORKING"}else if ready {"READY"}else{"CONNECTING"};
+    let label=format!("  WebCodex  /  {state}");
+    let label=compact_path(&label,width);
+    let prefix=if width>=2 {"  "}else{""};
+    let path=compact_path(project,width.saturating_sub(prefix.len()));
+    Text::from(vec![
+        Line::from(Span::styled(label,Style::default().add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(format!("{prefix}{path}"),theme_muted())),
+    ])
+}
+
 // Generate terminal-width rows only when content or terminal size changes.
 // Scrolling can then slice a cached viewport in O(visible rows) time.
 fn wrap_transcript_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'static>> {
@@ -408,9 +546,14 @@ fn render(f: &mut ratatui::Frame,app: &mut App) {
     // prevents ghost characters in terminals that keep old cell contents when
     // a wrapped line becomes shorter or the viewport changes.
     f.render_widget(Clear, area);
-    let rows=Layout::default().direction(Direction::Vertical).constraints([Constraint::Length(4),Constraint::Min(3),Constraint::Length(1),Constraint::Length(4),Constraint::Length(1)]).split(area);
+    let input_height=composer_height(&app.draft,area.width,area.height);
+    let rows=Layout::default().direction(Direction::Vertical).constraints([Constraint::Length(2),Constraint::Min(3),Constraint::Length(1),Constraint::Length(input_height),Constraint::Length(1)]).split(area);
     let header=Text::from(vec![Line::from(vec![Span::styled("  ╭─ ",theme_muted()),Span::styled("WebCodex",Style::default().add_modifier(Modifier::BOLD)),Span::styled(" ───────────────────────────────────────────────────╮",theme_muted())]),Line::from(Span::styled("  │  Coding agent",theme_muted())),Line::from(Span::styled(format!("  │  {}",app.project),theme_muted())),Line::from(Span::styled("  ╰────────────────────────────────────────────────────────────╯",theme_muted()))]);
-    f.render_widget(Paragraph::new(header),rows[0]);
+    let _=header;
+    f.render_widget(
+        Paragraph::new(header_lines(&app.project,rows[0].width as usize,app.busy,app.ready)),
+        rows[0],
+    );
     let height=rows[1].height as usize;
     // Keep the transcript off the terminal's final column. A wide glyph or a
     // full-width highlighted row there can trigger implicit wrap in ConPTY,
@@ -433,25 +576,31 @@ fn render(f: &mut ratatui::Frame,app: &mut App) {
     }
     if !app.tail && max_scroll>0 && rows[1].height>2 && rows[1].width>28 {
         let label=" ↓ Jump to latest (End) ";
-        let w=label.len() as u16;
+        let w=label.chars()
+            .map(|ch|UnicodeWidthChar::width(ch).unwrap_or(0))
+            .sum::<usize>() as u16;
         let jump=Rect{x:rows[1].right().saturating_sub(w+3),y:rows[1].bottom().saturating_sub(2),width:w,height:1};
         f.render_widget(Paragraph::new(Span::styled(label,Style::default().fg(Color::White).bg(Color::Rgb(55,55,55)))),jump);
     }
     let busy=if app.busy {"● Working…"} else if !app.ready {&app.status} else {""};
     f.render_widget(Paragraph::new(Span::styled(format!("  {busy}"),theme_muted())),rows[2]);
     let border=Block::default().borders(Borders::ALL).border_style(theme_muted());
-    let composer=Paragraph::new(format!("› {}",app.draft)).wrap(Wrap{trim:false}).block(border);
+    let editor_width=rows[3].width.saturating_sub(2).max(1) as usize;
+    let (cursor_row,cursor_col)=composer_cursor_position(&app.draft,app.cursor,editor_width);
+    let visible_rows=rows[3].height.saturating_sub(2).max(1) as usize;
+    let scroll_offset=cursor_row.saturating_sub(visible_rows.saturating_sub(1));
+    let composer=Paragraph::new(composer_visual_rows(&app.draft,editor_width).join("\n"))
+        .scroll((scroll_offset.min(u16::MAX as usize) as u16,0))
+        .block(border);
     f.render_widget(composer,rows[3]);
-    // Keep the editor cursor visible as text is entered and edited.
-    let inner_width=rows[3].width.saturating_sub(2).max(1) as usize;
-    let before_cursor=&app.draft[..app.cursor];
-    let cursor_line=before_cursor.split('\n').count().saturating_sub(1);
-    let last_line=before_cursor.rsplit('\n').next().unwrap_or("");
-    let cursor_col=1+last_line.chars().count();
-    let wrapped=cursor_col.saturating_sub(1)/inner_width;
-    let y=rows[3].y.saturating_add(1).saturating_add((cursor_line+wrapped).min(u16::MAX as usize) as u16);
-    let x=rows[3].x.saturating_add(1).saturating_add((cursor_col%inner_width) as u16);
-    if y<rows[3].bottom().saturating_sub(1){f.set_cursor_position((x,y));}
+    // Keep the editor cursor inside the visible input viewport.
+    let visible_row=cursor_row.saturating_sub(scroll_offset);
+    let y=rows[3].y.saturating_add(1).saturating_add(visible_row as u16);
+    let x=rows[3].x.saturating_add(1).saturating_add(cursor_col as u16);
+    if y<rows[3].bottom().saturating_sub(1)
+        && x<rows[3].right().saturating_sub(1) {
+        f.set_cursor_position((x,y));
+    }
     let footer=if app.approval.is_some() {"  Y allow  ·  N deny  ·  A always allow"} else {"  Enter send · ↑ history · PgUp/PgDn scroll · End latest · Alt+Enter newline · Ctrl+Q quit"};
     let footer=if app.draft.starts_with('/') {
         "  Up/Down select  |  Tab complete  |  Enter execute  |  Esc dismiss"
@@ -460,6 +609,7 @@ fn render(f: &mut ratatui::Frame,app: &mut App) {
     };
     f.render_widget(Paragraph::new(Span::styled(footer,theme_muted())),rows[4]);
     if app.draft.starts_with('/') && !app.busy && app.approval.is_none()
+        && app.settings.is_none() && app.page.is_none()
         && area.width >= 45 && area.height >= 18
     {
         let matches=command_palette::search(&app.draft);
@@ -492,6 +642,67 @@ fn render(f: &mut ratatui::Frame,app: &mut App) {
                 popup
             );
         }
+    }
+    if let Some(page)=&app.page {
+        let width=area.width.saturating_sub(4).min(86).max(1);
+        let height=area.height.saturating_sub(4).min(25).max(1);
+        let popup=Rect {
+            x:area.x+(area.width.saturating_sub(width))/2,
+            y:area.y+(area.height.saturating_sub(height))/2,
+            width,
+            height,
+        };
+        let visible=height.saturating_sub(4) as usize;
+        let offset=page.scroll.min(page.lines.len().saturating_sub(visible));
+        let lines=if page.choices.is_empty(){
+            page.lines.iter().skip(offset).take(visible)
+                .map(|line|Line::from(line.clone()))
+                .collect::<Vec<_>>()
+        }else{
+            let start=page.scroll.min(page.choices.len().saturating_sub(visible.max(1)));
+            page.choices.iter().enumerate().skip(start).take(visible)
+                .map(|(index,session)|{
+                    let selected=index==page.selected;
+                    let marker=if selected {">"}else{" "};
+                    let active=if session.active {" [ACTIVE]"}else{""};
+                    let label=format!(
+                        "  {marker} {}{}  |  {}",
+                        session.title,active,session.updated
+                    );
+                    let style=if selected {
+                        Style::default().fg(Color::White).bg(Color::Rgb(55,55,65))
+                    }else{
+                        theme_muted()
+                    };
+                    Line::from(Span::styled(label,style))
+                })
+                .collect::<Vec<_>>()
+        };
+        f.render_widget(Clear,popup);
+        f.render_widget(
+            Paragraph::new(lines)
+                .block(Block::default()
+                    .title(format!(" {} ",page.title))
+                    .borders(Borders::ALL)
+                    .border_style(theme_muted())),
+            popup,
+        );
+        let footer=Rect {
+            x:popup.x.saturating_add(2),
+            y:popup.bottom().saturating_sub(2),
+            width:popup.width.saturating_sub(4),
+            height:1,
+        };
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                if page.choices.is_empty(){
+                    "Up/Down scroll  |  PgUp/PgDn page  |  Esc close"
+                }else{
+                    "Up/Down select  |  Enter switch  |  Esc cancel"
+                },
+                theme_muted())),
+            footer,
+        );
     }
     if let Some(settings)=&app.settings {
         let width=area.width.saturating_sub(4).min(68).max(1);
@@ -538,7 +749,7 @@ fn render(f: &mut ratatui::Frame,app: &mut App) {
         );
     }
     if let Some(question)=&app.approval {
-        let w=area.width.saturating_sub(8).min(85).max(15);
+        let w=area.width.saturating_sub(2).min(85).max(1);
         let h=7.min(area.height);
         let popup=Rect{x:area.x+(area.width.saturating_sub(w))/2,y:area.y+(area.height.saturating_sub(h))/2,width:w,height:h};
         f.render_widget(Clear,popup);
@@ -549,9 +760,34 @@ fn on_message(app:&mut App, m:Incoming) {match m.kind.as_str() {
     "busy"=>app.busy=m.body=="true", "status"=>{app.status=m.body;if app.entries.is_empty(){app.transcript_dirty=true;}}, "ready"=>{app.ready=true;app.status.clear();if app.entries.is_empty(){app.transcript_dirty=true;}}, "approve"=>app.approval=Some(m.body), "exit"=>app.exit=true,
     "settings"=>{
         if let Ok(settings)=serde_json::from_str::<SettingsView>(&m.body){
+            app.page=None;
             app.settings=Some(settings);
             app.settings_index=0;
         }
+    },
+    "page"=>{
+        if let Ok(mut page)=serde_json::from_str::<PageView>(&m.body){
+            page.selected=page.choices.iter()
+                .position(|choice|choice.active)
+                .unwrap_or(0);
+            page.scroll=page.selected;
+            app.settings=None;
+            app.page=Some(page);
+        }
+    },
+    "session_reset"=>{
+        app.entries.clear();
+        app.history.clear();
+        app.history_index=None;
+        app.history_stash.clear();
+        app.set_draft(String::new());
+        app.page=None;
+        app.settings=None;
+        app.scroll=0;
+        app.max_scroll=0;
+        app.tail=true;
+        app.transcript_dirty=true;
+        app.busy=false;
     },
     "stream"=>app.stream(m.body), "stream_end"=>app.end_stream(m.body),
     "history"=>{if let Ok(messages)=serde_json::from_str::<Vec<(String,String)>>(&m.body){app.load_history(&messages);}},
@@ -613,7 +849,7 @@ fn loop_ui(terminal:&mut Terminal<CrosstermBackend<io::Stdout>>, sock:&mut TcpSt
             let kind=m.kind.clone();
             on_message(&mut app,m);
             redraw=true;
-            if matches!(kind.as_str(),"history"|"stream"|"stream_end"|"user"|"assistant"|"activity"|"output"|"system"|"error"|"clear"|"ready") {
+            if matches!(kind.as_str(),"history"|"stream"|"stream_end"|"user"|"assistant"|"activity"|"output"|"system"|"error"|"clear"|"ready"|"page"|"settings"|"session_reset") {
                 full_repaint=true;
             }
         }
@@ -633,8 +869,35 @@ fn loop_ui(terminal:&mut Terminal<CrosstermBackend<io::Stdout>>, sock:&mut TcpSt
         redraw=true;
         match event::read()? {
             Event::Resize(_,_)=>{app.transcript_dirty=true;full_repaint=true;},
-            Event::Mouse(m)=>match m.kind { MouseEventKind::ScrollUp=>{app.move_scroll(-3);full_repaint=true;},MouseEventKind::ScrollDown=>{app.move_scroll(3);full_repaint=true;},
+            Event::Mouse(m)=>match m.kind {
+                MouseEventKind::ScrollUp=>{
+                    if let Some(page)=app.page.as_mut(){
+                        if page.choices.is_empty(){
+                            page.move_scroll(-3);
+                        }else{
+                            page.select_relative(-3);
+                        }
+                    }else if app.settings.is_none() && app.approval.is_none(){
+                        app.move_scroll(-3);
+                    }
+                    full_repaint=true;
+                },
+                MouseEventKind::ScrollDown=>{
+                    if let Some(page)=app.page.as_mut(){
+                        if page.choices.is_empty(){
+                            page.move_scroll(3);
+                        }else{
+                            page.select_relative(3);
+                        }
+                    }else if app.settings.is_none() && app.approval.is_none(){
+                        app.move_scroll(3);
+                    }
+                    full_repaint=true;
+                },
                 MouseEventKind::Down(crossterm::event::MouseButton::Left)=>{
+                    if app.page.is_some() || app.settings.is_some() || app.approval.is_some(){
+                        continue;
+                    }
                     let size=terminal.size()?;
                     if !app.tail && m.row>=size.height.saturating_sub(8) && m.row<size.height.saturating_sub(5)
                         && m.column>size.width.saturating_sub(35){app.jump_bottom();full_repaint=true;}
@@ -652,6 +915,44 @@ fn loop_ui(terminal:&mut Terminal<CrosstermBackend<io::Stdout>>, sock:&mut TcpSt
                 if app.approval.is_some(){
                     let ans=match code {KeyCode::Char('y')|KeyCode::Char('Y')=>Some("y"),KeyCode::Char('n')|KeyCode::Char('N')|KeyCode::Esc=>Some("n"),KeyCode::Char('a')|KeyCode::Char('A')=>Some("a"),_=>None};
                     if let Some(a)=ans {send(sock,"approve",a)?;app.approval=None;}
+                    continue;
+                }
+                if let Some(page)=app.page.as_mut(){
+                    if page.choices.is_empty(){
+                        match code {
+                            KeyCode::Esc|KeyCode::Enter=>app.page=None,
+                            KeyCode::Up=>page.move_scroll(-1),
+                            KeyCode::Down=>page.move_scroll(1),
+                            KeyCode::PageUp=>page.move_scroll(-12),
+                            KeyCode::PageDown=>page.move_scroll(12),
+                            KeyCode::Home=>page.scroll=0,
+                            KeyCode::End=>page.scroll=page.lines.len().saturating_sub(1),
+                            _=>{},
+                        }
+                    }else{
+                        match code {
+                            KeyCode::Esc=>app.page=None,
+                            KeyCode::Up=>page.select_relative(-1),
+                            KeyCode::Down=>page.select_relative(1),
+                            KeyCode::PageUp=>page.select_relative(-10),
+                            KeyCode::PageDown=>page.select_relative(10),
+                            KeyCode::Home=>page.selected=0,
+                            KeyCode::End=>page.selected=page.choices.len()-1,
+                            KeyCode::Enter if !app.busy=>{
+                                if let Some(id)=page.selected_session_id(){
+                                    send(sock,"task",&format!("/session {id}"))?;
+                                    app.page=None;
+                                    app.busy=true;
+                                }
+                            },
+                            _=>{},
+                        }
+                        if let Some(page)=app.page.as_mut(){
+                            if !page.choices.is_empty(){
+                                page.scroll=page.selected;
+                            }
+                        }
+                    }
                     continue;
                 }
                 if app.settings.is_some(){
@@ -724,6 +1025,359 @@ fn main(){let mut args=env::args().skip(1);let port=args.next().and_then(|s|s.pa
 #[cfg(test)]
 mod regression_tests {
     use super::*;
+
+    #[test]
+    fn socket_protocol_transmits_complete_json_messages(){
+        use std::net::TcpListener;
+
+        let listener=TcpListener::bind("127.0.0.1:0").unwrap();
+        let address=listener.local_addr().unwrap();
+        let receiver=std::thread::spawn(move || {
+            let (socket,_)=listener.accept().unwrap();
+            socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            let mut reader=BufReader::new(socket);
+            let mut messages=Vec::new();
+
+            for _ in 0..3 {
+                let mut line=String::new();
+                assert!(reader.read_line(&mut line).unwrap()>0);
+                let value:serde_json::Value=serde_json::from_str(&line).unwrap();
+                messages.push(value);
+            }
+
+            messages
+        });
+
+        let mut socket=TcpStream::connect(address).unwrap();
+        send(&mut socket,"task","/sessions").unwrap();
+        send(&mut socket,"task","Unicode: \u{1F680}\nSecond line").unwrap();
+        send(&mut socket,"exit","").unwrap();
+
+        let messages=receiver.join().unwrap();
+        assert_eq!(messages.len(),3);
+        assert_eq!(messages[0]["kind"],"task");
+        assert_eq!(messages[0]["body"],"/sessions");
+        assert_eq!(messages[1]["body"],"Unicode: \u{1F680}\nSecond line");
+        assert_eq!(messages[2]["kind"],"exit");
+    }
+    #[test]
+    fn session_reset_discards_previous_conversation_state(){
+        let mut app=App::new("project".into());
+        app.load_history(&[
+            ("user".into(),"Old question".into()),
+            ("assistant".into(),"Old answer".into()),
+        ]);
+        app.set_draft("Old draft".into());
+        app.page=Some(PageView{
+            title:"Saved conversations".into(),
+            lines:vec!["Old session".into()],
+            choices:vec![],
+            selected:0,
+            scroll:0,
+        });
+
+        on_message(&mut app,Incoming{
+            kind:"session_reset".into(),
+            title:String::new(),
+            body:String::new(),
+        });
+
+        assert!(app.entries.is_empty());
+        assert!(app.history.is_empty());
+        assert!(app.draft.is_empty());
+        assert!(app.page.is_none());
+        assert!(app.tail);
+
+        app.load_history(&[
+            ("user".into(),"New question".into()),
+            ("assistant".into(),"New answer".into()),
+        ]);
+        assert_eq!(app.entries.len(),2);
+        assert_eq!(app.history,["New question"]);
+    }
+
+    #[test]
+    fn page_message_opens_information_screen(){
+        let mut app=App::new("project".into());
+        on_message(&mut app,Incoming{
+            kind:"page".into(),
+            title:String::new(),
+            body:r#"{"title":"Session status","lines":["Project","Thread","Ready"]}"#.into(),
+        });
+        assert_eq!(app.page.as_ref().unwrap().title,"Session status");
+        assert_eq!(app.page.as_ref().unwrap().lines.len(),3);
+        assert_eq!(app.page.as_ref().unwrap().scroll,0);
+    }
+
+    #[test]
+    fn opening_settings_closes_an_information_page(){
+        let mut app=App::new("project".into());
+        app.page=Some(PageView{
+            title:"Saved conversations".into(),
+            lines:vec!["Session one".into()],
+            choices:vec![],
+            selected:0,
+            scroll:0,
+        });
+
+        on_message(&mut app,Incoming{
+            kind:"settings".into(),
+            title:String::new(),
+            body:r#"{"auto_apply":false,"allow_run":false,"approval_never":false,"max_turns":100}"#.into(),
+        });
+
+        assert!(app.page.is_none());
+        assert!(app.settings.is_some());
+    }
+
+    #[test]
+    fn page_message_closes_settings(){
+        let mut app=App::new("project".into());
+        app.settings=Some(SettingsView{
+            auto_apply:false,
+            allow_run:false,
+            approval_never:false,
+            max_turns:100,
+        });
+        on_message(&mut app,Incoming{
+            kind:"page".into(),
+            title:String::new(),
+            body:r#"{"title":"Saved conversations","lines":["First session"]}"#.into(),
+        });
+        assert!(app.settings.is_none());
+        assert_eq!(app.page.as_ref().unwrap().title,"Saved conversations");
+    }
+
+    #[test]
+    fn approval_dialog_fits_inside_small_terminals(){
+        for (width,height) in [(10,7),(15,8),(20,10),(40,12)] {
+            let backend=ratatui::backend::TestBackend::new(width,height);
+            let mut terminal=ratatui::Terminal::new(backend).unwrap();
+            let mut app=App::new("test".into());
+            app.approval=Some("Apply changes?".into());
+            terminal.draw(|frame|render(frame,&mut app)).unwrap();
+        }
+    }
+
+    #[test]
+    fn modal_screens_render_without_panicking(){
+        let backend=ratatui::backend::TestBackend::new(60,22);
+        let mut terminal=ratatui::Terminal::new(backend).unwrap();
+        let mut app=App::new("test project".into());
+        app.ready=true;
+
+        on_message(&mut app,Incoming{
+            kind:"page".into(),
+            title:String::new(),
+            body:r#"{"title":"Saved conversations","lines":[],"choices":[{"id":"one","title":"First","updated":"today","active":false},{"id":"two","title":"Second","updated":"today","active":true}]}"#.into(),
+        });
+        terminal.draw(|frame|render(frame,&mut app)).unwrap();
+
+        on_message(&mut app,Incoming{
+            kind:"settings".into(),
+            title:String::new(),
+            body:r#"{"auto_apply":false,"allow_run":false,"approval_never":false,"max_turns":100}"#.into(),
+        });
+        terminal.draw(|frame|render(frame,&mut app)).unwrap();
+        assert!(app.page.is_none());
+        assert!(app.settings.is_some());
+    }
+
+    #[test]
+    fn structured_sessions_load_with_active_selection(){
+        let mut app=App::new("project".into());
+        on_message(&mut app,Incoming{
+            kind:"page".into(),
+            title:String::new(),
+            body:r#"{"title":"Saved conversations","lines":[],"choices":[{"id":"one","title":"First task","updated":"2026-11-05","active":true},{"id":"two","title":"Second task","updated":"2026-11-05","active":false}]}"#.into(),
+        });
+        let page=app.page.as_ref().unwrap();
+        assert_eq!(page.choices.len(),2);
+        assert_eq!(page.choices[0].id,"one");
+        assert!(page.choices[0].active);
+        assert_eq!(page.choices[1].title,"Second task");
+        assert_eq!(page.selected,0);
+    }
+
+    #[test]
+    fn full_terminal_renders_at_multiple_sizes(){
+        for (width,height) in [(120,40),(80,24),(45,18),(30,12),(20,10)] {
+            let backend=ratatui::backend::TestBackend::new(width,height);
+            let mut terminal=ratatui::Terminal::new(backend).unwrap();
+            let mut app=App::new("C:/Users/example/projects/webcodex".into());
+            app.ready=true;
+            app.load_history(&[
+                ("user".into(),"A long question that wraps across the terminal.".into()),
+                ("assistant".into(),"A response with multiple paragraphs and details.".into()),
+            ]);
+            app.set_draft("First line\nSecond line\nThird line".into());
+
+            terminal.draw(|frame|render(frame,&mut app)).unwrap();
+            assert_eq!(terminal.backend().buffer().area.width,width);
+            assert_eq!(terminal.backend().buffer().area.height,height);
+        }
+    }
+
+    #[test]
+    fn header_never_overflows_narrow_terminals(){
+        for width in 0..=30 {
+            let header=header_lines(
+                "C:/Users/example/a/very/long/project",
+                width,
+                true,
+                true
+            );
+            assert!(header.lines.iter().all(|line|line.width()<=width));
+        }
+    }
+
+    #[test]
+    fn composer_height_remains_bounded_for_huge_pastes(){
+        let draft="A very long line\n".repeat(100_000);
+        assert_eq!(composer_height(&draft,80,40),12);
+        assert_eq!(composer_height(&draft,80,16),8);
+    }
+
+    #[test]
+    fn composer_visual_rows_match_cursor_wrapping(){
+        let draft="abcdef ghij";
+        let rows=composer_visual_rows(draft,6);
+        assert_eq!(rows,vec!["› abcd","ef ghi","j"]);
+        assert_eq!(composer_cursor_position(draft,draft.len(),6),(2,1));
+
+        let multiline="ab\ncd";
+        assert_eq!(composer_visual_rows(multiline,5),vec!["› ab","cd"]);
+        assert_eq!(composer_cursor_position(multiline,multiline.len(),5),(1,2));
+    }
+
+    #[test]
+    fn composer_cursor_tracks_explicit_newlines(){
+        assert_eq!(composer_cursor_position("",0,40),(0,2));
+        assert_eq!(composer_cursor_position("hello",5,40),(0,7));
+        assert_eq!(composer_cursor_position("hello\nworld",11,40),(1,5));
+        assert_eq!(composer_cursor_position("hello\nworld",6,40),(1,0));
+    }
+
+    #[test]
+    fn composer_grows_for_multiline_prompts(){
+        assert_eq!(composer_height("",100,40),4);
+        assert_eq!(composer_height("first\nsecond\nthird",100,40),5);
+        assert_eq!(composer_height("one\n\nthree\nfour\nfive",100,40),7);
+    }
+
+    #[test]
+    fn composer_cursor_tracks_wrapped_text(){
+        assert_eq!(composer_cursor_position("abcdef",6,8),(1,0));
+        assert_eq!(composer_cursor_position("abcdefg",7,8),(1,1));
+        assert_eq!(composer_cursor_position("abcdefghij",10,5),(2,2));
+    }
+
+    #[test]
+    fn composer_cursor_handles_unicode(){
+        let draft="中🙂abc";
+        assert_eq!(composer_cursor_position(draft,draft.len(),20),(0,9));
+        assert_eq!(composer_cursor_position(draft,draft.len(),6),(1,3));
+    }
+
+    #[test]
+    fn composer_height_is_bounded(){
+        let long_prompt="abcdefghij\n".repeat(100);
+        assert_eq!(composer_height(&long_prompt,80,40),12);
+        assert!(composer_height(&long_prompt,80,16)<=8);
+        assert_eq!(composer_height("hello",80,40),4);
+    }
+
+    #[test]
+    fn composer_cursor_respects_edit_position(){
+        let draft="first\nsecond";
+        assert_eq!(composer_cursor_position(draft,3,40),(0,5));
+        assert_eq!(composer_cursor_position(draft,6,40),(1,0));
+        assert_eq!(composer_cursor_position(draft,draft.len(),40),(1,6));
+    }
+
+    #[test]
+    fn composer_cursor_handles_non_boundary_offsets(){
+        let draft="a🙂b";
+        assert_eq!(composer_cursor_position(draft,2,40),(0,3));
+        assert_eq!(composer_cursor_position(draft,100,40),(0,6));
+    }
+
+    #[test]
+    fn composer_accounts_for_wrapped_text(){
+        let draft="x".repeat(120);
+        assert!(composer_height(&draft,40,40)>4);
+        assert!(composer_height(&draft,40,40)<=12);
+    }
+
+    #[test]
+    fn header_adapts_to_terminal_width(){
+        let header=header_lines("C:/Users/example/very/long/project/location",40,false,true);
+        assert_eq!(header.lines.len(),2);
+        assert!(header.lines[0].width()<=40);
+        assert!(header.lines[1].width()<=40);
+
+        let narrow=header_lines("C:/Users/example/project",16,true,true);
+        assert!(narrow.lines[1].width()<=16);
+        assert!(narrow.lines[0].spans[0].content.contains("WORKING"));
+    }
+
+    #[test]
+    fn compact_path_preserves_the_project_name(){
+        assert_eq!(compact_path("C:/example/webcodex",12),".../webcodex");
+        assert_eq!(compact_path("C:/example/webcodex",11),"...webcodex");
+        assert_eq!(compact_path("project",20),"project");
+        assert_eq!(compact_path("project",0),"");
+    }
+
+    #[test]
+    fn session_selection_is_bounded(){
+        let mut app=App::new("project".into());
+        on_message(&mut app,Incoming{
+            kind:"page".into(),
+            title:String::new(),
+            body:r#"{"title":"Saved conversations","lines":[],"choices":[{"id":"first","title":"First","updated":"today","active":false},{"id":"second","title":"Second","updated":"today","active":true}]}"#.into(),
+        });
+        let page=app.page.as_mut().unwrap();
+        assert_eq!(page.selected_session_id(),Some("second"));
+        page.select_relative(100);
+        assert_eq!(page.selected,1);
+        page.select_relative(-100);
+        assert_eq!(page.selected_session_id(),Some("first"));
+        page.select_relative(1);
+        assert_eq!(page.scroll,1);
+    }
+
+    #[test]
+    fn empty_session_selection_is_safe(){
+        let mut app=App::new("project".into());
+        on_message(&mut app,Incoming{
+            kind:"page".into(),
+            title:String::new(),
+            body:r#"{"title":"Saved conversations","lines":[],"choices":[]}"#.into(),
+        });
+        let page=app.page.as_mut().unwrap();
+        page.select_relative(100);
+        assert!(page.selected_session_id().is_none());
+        assert_eq!(page.scroll,0);
+    }
+
+    #[test]
+    fn page_scrolling_is_bounded(){
+        let mut page=PageView{
+            title:"Files".into(),
+            lines:(0..30).map(|i|format!("File {i}")).collect(),
+            choices:vec![],
+            selected:0,
+            scroll:0,
+        };
+        page.move_scroll(-10);
+        assert_eq!(page.scroll,0);
+        page.move_scroll(1000);
+        assert_eq!(page.scroll,29);
+        page.move_scroll(-1000);
+        assert_eq!(page.scroll,0);
+    }
+
     #[test]
     fn settings_panel_selects_real_commands(){
         let mut app=App::new("project".into());

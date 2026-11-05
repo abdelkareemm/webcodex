@@ -10,15 +10,15 @@ if ($running.Count -gt 0) {
 
 $items = @(
     @{
-        Source = Join-Path $root 'rust-core\target-ui-next\release\webcodex-native.exe'
+        Source = Join-Path $root 'rust-core\target-staging\release\webcodex-native.exe'
         Destination = Join-Path $root 'rust-core\target\release\webcodex-native.exe'
     },
     @{
-        Source = Join-Path $root 'rust-core\target-ui-next\release\webcodex-core.exe'
+        Source = Join-Path $root 'rust-core\target-staging\release\webcodex-core.exe'
         Destination = Join-Path $root 'rust-core\target\release\webcodex-core.exe'
     },
     @{
-        Source = Join-Path $root 'rust-tui\target-ui-next\release\webcodex-tui.exe'
+        Source = Join-Path $root 'rust-tui\target-validation\release\webcodex-tui.exe'
         Destination = Join-Path $root 'rust-tui\target\release\webcodex-tui.exe'
     }
 )

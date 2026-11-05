@@ -8,7 +8,7 @@ use std::{collections::{BTreeMap},env,fs,io::{self,BufRead,BufReader,Write,IsTer
 
 const PROTOCOL:&str=include_str!("../../assets/protocol.txt");
 const REMINDER:&str=include_str!("../../assets/reminder.txt");
-const HELP:&str="/new  start a new chat; /chat show chat URL; /undo undo last edit set; /yes toggle auto-apply; /run toggle shell commands; /permissions change execution permissions; /settings interactive settings; /turns [1-1000] task turn limit; /files show visible files; /status show settings; /help; /quit";
+const HELP:&str="/new  start a new chat; /sessions browse and switch saved conversations; /session <id> switch directly to a saved conversation; /chat show chat URL; /undo undo last edit set; /yes toggle auto-apply; /run toggle shell commands; /permissions change execution permissions; /settings interactive settings; /turns [1-1000] task turn limit; /files show visible files; /status show settings; /help; /quit";
 
 fn err<T:ToString>(value:T)->String{value.to_string()}
 fn strings(v:&Value)->Vec<String>{v.as_array().map(|a|a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default()}
@@ -113,7 +113,19 @@ impl Ui {
             let line=json!({"kind":kind,"body":body});
             if serde_json::to_writer(&mut *s,&line).is_ok(){let _=s.write_all(b"\n");let _=s.flush();}
         }else if !body.is_empty(){
-            match kind {"error"=>eprintln!("{body}"),"activity"=>println!("  {body}"),"assistant"=>println!("\n{body}\n"),"user"|"busy"=>{},_=>println!("{body}")}
+            match kind {
+                "error"=>eprintln!("{body}"),
+                "activity"=>println!("  {body}"),
+                "assistant"=>println!("\n{body}\n"),
+                "user"|"busy"=>{},
+                "page"=>{
+                    if let Ok(page)=serde_json::from_str::<Value>(body){
+                        println!("\n{}\n",page["title"].as_str().unwrap_or("Information"));
+                        for line in strings(&page["lines"]){println!("{line}");}
+                    }
+                },
+                _=>println!("{body}")
+            }
         }
     }
     fn receive(&mut self)->Result<Option<String>,String>{
@@ -554,10 +566,114 @@ impl Agent {
         }
         self.persist()?;Ok(())
     }
+    fn switch_session(&mut self,id:&str)->Result<(),String>{
+        if self.thread.as_deref()==Some(id){
+            self.ui.event("system","This conversation is already active.");
+            return Ok(());
+        }
+
+        let found=self.store("get",json!({"thread_id":id}))?;
+        let thread=&found["thread"];
+        if thread.is_null(){
+            return Err(format!("Saved conversation not found: {id}"));
+        }
+        let expected=self.root.to_string_lossy();
+        if thread["project_root"].as_str()!=Some(expected.as_ref()){
+            return Err("Cannot switch to a conversation from another workspace.".into());
+        }
+
+        let url=thread["chat_url"].as_str()
+            .ok_or("This session has no saved ChatGPT URL. Use webcodex resume or start a new conversation.")?
+            .to_string();
+        let validated=chatgpt_resume_url(&url)?;
+        let saved=self.store("load_state",json!({"thread_id":id}))?;
+        let new_state=if saved["state"].is_object(){
+            saved["state"].clone()
+        }else{
+            fresh_state()
+        };
+        let history=self.store("messages",json!({"thread_id":id,"limit":50}))?;
+        let mut restored=Vec::<(String,String)>::new();
+        for item in history["messages"].as_array().into_iter().flatten(){
+            let role=item["role"].as_str().unwrap_or("");
+            let content=item["content"].as_str().unwrap_or("");
+            match role {
+                "user"=>restored.push(("user".into(),content.into())),
+                "assistant"=>{
+                    let display=clean_reply(content);
+                    if !display.is_empty(){
+                        restored.push(("assistant".into(),display));
+                    }
+                },
+                _=>{}
+            }
+        }
+
+        // Save the outgoing session before navigating away.
+        if self.thread.is_some(){
+            self.persist()?;
+        }
+
+        self.ui.event("status","Opening saved ChatGPT conversation...");
+        let opened=self.browser.call(json!({
+            "op":"open_chat","url":validated
+        }),Some(&mut self.ui))?;
+        if opened["ok"]!=true{
+            return Err("ChatGPT rejected the saved conversation URL. The active session was not changed.".into());
+        }
+
+        // Commit the switch only after browser navigation succeeds.
+        self.thread=Some(id.to_string());
+        self.state=new_state;
+        self.ui.event("session_reset","");
+        if let Ok(batch)=serde_json::to_string(&restored){
+            self.ui.event("history",&batch);
+        }
+        self.ui.event("system",&format!("Switched to saved conversation {id}"));
+        self.persist()?;
+        Ok(())
+    }
+
     fn command(&mut self,command:&str)->Result<bool,String>{
         match command.split_whitespace().next().unwrap_or(""){
             "/quit"|"/exit"|"/q"=>return Ok(false),
-            "/help"=>self.ui.event("system",HELP),
+            "/help"=>{
+                self.ui.event("page",&json!({
+                    "title":"Help and keyboard shortcuts",
+                    "lines":[
+                        "NAVIGATION",
+                        "  Ctrl+K          Open command palette",
+                        "  Tab             Complete a slash command",
+                        "  Up/Down         Navigate menus or message history",
+                        "  PageUp/PageDown Scroll conversation",
+                        "  End             Jump to latest response",
+                        "  Alt+Enter       Insert a newline",
+                        "  Ctrl+L          Clear visible transcript",
+                        "  Ctrl+Q          Exit WebCodex",
+                        "",
+                        "CONVERSATIONS",
+                        "  /new            Start a conversation",
+                        "  /sessions       Browse and switch saved conversations",
+                        "  /session <id>   Switch to a saved conversation",
+                        "  /chat           Display the ChatGPT conversation URL",
+                        "  /clear          Clear visible transcript",
+                        "",
+                        "WORKSPACE",
+                        "  /files          Browse indexed project files",
+                        "  /undo           Restore the last edit set",
+                        "  /status         View session information",
+                        "",
+                        "CONFIGURATION",
+                        "  /settings       Interactive settings",
+                        "  /permissions    Execution permissions",
+                        "  /turns          Automatic turn limit",
+                        "  /yes            Toggle automatic file approvals",
+                        "  /run            Toggle shell execution",
+                        "",
+                        "Shell execution is not OS-sandboxed."
+                    ]
+                }).to_string());
+            },
             "/settings"=>{
                 self.ui.event("settings",&json!({
                     "auto_apply":self.yes,
@@ -621,13 +737,119 @@ impl Agent {
                     _=>self.ui.event("error","Usage: /turns <1-1000>"),
                 }
             },
-            "/status"=>self.ui.event("system",&format!("project: {}\nthread: {}\nauto apply: {}\nrun commands: {}\napproval never: {}\nmax turns per task: {}",self.root.display(),self.thread.as_deref().unwrap_or("new"),self.yes,self.allow_run,self.approve_never,self.max_turns)),
+            "/status"=>{
+                self.ui.event("page",&json!({
+                    "title":"Session status",
+                    "lines":[
+                        "PROJECT",
+                        &format!("  {}",self.root.display()),
+                        "",
+                        "CONVERSATION",
+                        &format!("  Thread: {}",self.thread.as_deref().unwrap_or("new")),
+                        "",
+                        "EXECUTION",
+                        &format!("  File editing: {}",if self.yes{"automatic"}else{"approval required"}),
+                        &format!("  Shell commands: {}",if self.allow_run{"enabled"}else{"disabled"}),
+                        &format!("  Approval prompts: {}",if self.approve_never{"disabled"}else{"enabled"}),
+                        &format!("  Maximum task turns: {}",self.max_turns),
+                        "",
+                        "Use /settings to change execution options."
+                    ]
+                }).to_string());
+            },
+            "/session"=>{
+                let args:Vec<&str>=command.split_whitespace().collect();
+                match args.as_slice(){
+                    [_,id] if !id.is_empty()=>self.switch_session(id)?,
+                    _=>self.ui.event("error","Usage: /session <saved-session-id>. Use /sessions to find IDs."),
+                }
+            },
             "/chat"=>{let url=self.browser.call(json!({"op":"current_url"}),None)?;self.ui.event("system",url["url"].as_str().unwrap_or("No chat URL yet"))},
-            "/files"=>{let scan=self.scan()?;let entries=scan["entries"].clone();let mut names=Vec::new();if let Some(entries)=entries.as_object(){for k in entries.keys(){names.push(k.clone());}}self.ui.event("system",&names.join("\n"))},
+            "/sessions"=>{
+                let result=self.store("list",json!({
+                    "project_root":self.root.to_string_lossy(),
+                    "limit":100
+                }))?;
+                let threads=result["threads"].as_array()
+                    .ok_or("saved conversation list is unavailable")?;
+
+                let mut lines=vec![
+                    format!("Workspace: {}",self.root.display()),
+                    format!("{} saved conversations",threads.len()),
+                    "".to_string(),
+                ];
+                let mut choices=Vec::new();
+
+                if threads.is_empty(){
+                    lines.push("No saved conversations in this workspace.".into());
+                    lines.push("Start a task to create your first session.".into());
+                } else {
+                    for (index,thread) in threads.iter().enumerate(){
+                        let id=thread["id"].as_str().unwrap_or("unknown");
+                        let title=thread["title"].as_str().unwrap_or("Untitled");
+                        let updated=thread["updated_at"].as_str().unwrap_or("Unknown date");
+                        let current=self.thread.as_deref()==Some(id);
+                        let marker=if current{"[ACTIVE]"}else{"        "};
+                        choices.push(json!({
+                            "id":id,
+                            "title":title,
+                            "updated":updated,
+                            "active":current
+                        }));
+
+                        lines.push(format!(
+                            "{:>3}. {} {}",
+                            index+1,marker,title
+                        ));
+                        lines.push(format!("       Updated: {updated}"));
+                        lines.push(format!("       Session: {id}"));
+                        lines.push(String::new());
+                    }
+                }
+
+                lines.push("Close this screen with Esc.".into());
+                lines.push("Select a conversation with Up/Down and press Enter to switch.".into());
+
+                self.ui.event("page",&json!({
+                    "title":"Saved conversations",
+                    "lines":lines,
+                    "choices":choices
+                }).to_string());
+            },
+            "/files"=>{
+                let scan=self.scan()?;
+                let entries=&scan["entries"];
+                let mut names=Vec::new();
+                if let Some(entries)=entries.as_object(){
+                    for name in entries.keys(){
+                        names.push(format!("  {name}"));
+                    }
+                }
+                let count=names.len();
+                let mut lines=vec![
+                    format!("Project: {}",self.root.display()),
+                    format!("{count} indexed files"),
+                    "".into(),
+                ];
+                lines.extend(names);
+                self.ui.event("page",&json!({
+                    "title":"Project files",
+                    "lines":lines
+                }).to_string());
+            },
             "/yes"=>{self.yes=!self.yes;self.ui.event("system",&format!("auto apply: {}",self.yes))},
             "/run"=>{self.allow_run=!self.allow_run;self.ui.event("system",&format!("run commands: {}",self.allow_run))},
             "/clear"=>self.ui.event("clear",""),
-            "/new"=>{self.browser.call(json!({"op":"new_chat"}),None)?;self.thread=None;self.state=fresh_state();self.ui.event("system","New chat started.")},
+            "/new"=>{
+                if self.thread.is_some(){
+                    self.persist()?;
+                }
+                self.browser.call(json!({"op":"new_chat"}),None)?;
+                self.thread=None;
+                self.state=fresh_state();
+                self.ui.event("session_reset","");
+                self.ui.event("system","New chat started.");
+            },
             "/undo"=>{
                 let result=self.worker("backup_undo",json!({"root":self.root.to_string_lossy()}))?;
                 if result["nothing"]==true{self.ui.event("system","Nothing to undo.")}

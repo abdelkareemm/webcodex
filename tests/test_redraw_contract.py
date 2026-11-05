@@ -12,7 +12,14 @@ class RedrawContract(unittest.TestCase):
 
     def test_scroll_resize_and_new_transcript_force_repaint(self):
         self.assertIn('Event::Resize(_,_)=>{app.transcript_dirty=true;full_repaint=true;}', TUI)
-        self.assertIn('MouseEventKind::ScrollUp=>{app.move_scroll(-3);full_repaint=true;}', TUI)
+        self.assertIn('MouseEventKind::ScrollUp=>{', TUI)
+        self.assertIn('MouseEventKind::ScrollDown=>{', TUI)
+        self.assertIn('if let Some(page)=app.page.as_mut(){', TUI)
+        self.assertIn('page.move_scroll(-3);', TUI)
+        self.assertIn('page.move_scroll(3);', TUI)
+        self.assertIn('app.move_scroll(-3);', TUI)
+        self.assertIn('app.move_scroll(3);', TUI)
+        self.assertIn('full_repaint=true;', TUI)
         self.assertIn('KeyCode::PageUp=>{app.move_scroll(-20);full_repaint=true;}', TUI)
         self.assertIn('"history"|"stream"|"stream_end"', TUI)
 
