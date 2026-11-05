@@ -1,46 +1,68 @@
-# Python
+# Python caches and packaging
 __pycache__/
 *.py[cod]
-*.pyo
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.tox/
+.nox/
 .coverage
+.coverage.*
 htmlcov/
+*.egg-info/
+pip-wheel-metadata/
 build/
 dist/
-*.egg-info/
+site/
+
+# Python environments
 .venv/
 venv/
 env/
+ENV/
+.python-version
 
-# Rust
+# Rust build artifacts
 target/
 **/target/
 *.pdb
+*.rlib
+*.rmeta
 
-# Keep Cargo.lock files for reproducible application builds.
+# Cargo.lock is tracked for reproducible application builds.
 
-# WebCodex local state
+# WebCodex runtime state
 .webcodex/
 **/.webcodex/
+workspace.sqlite3
 *.sqlite
 *.sqlite3
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
 *.db
+*.db-journal
 *.db-shm
 *.db-wal
 
-# Browser state and Playwright output
+# Browser data, authentication and Playwright artifacts
 browser-profile/
 browser-profiles/
 playwright-profile/
 playwright-report/
 test-results/
+user-data/
+user_data/
+chrome-profile/
+chromium-profile/
+chrome_debug.log
 trace.zip
 *.har
 *.webm
+storage-state.json
+storage_state.json
 
-# Secrets and local configuration
+# Secrets and credentials
 .env
 .env.*
 !.env.example
@@ -49,25 +71,44 @@ trace.zip
 *.p12
 *.pfx
 *.token
+*.secrets
 credentials.json
 secrets.json
 auth.json
-storage-state.json
-storage_state.json
+cookies.json
+token.json
+client_secret*.json
+id_rsa
+id_ed25519
 
-# Editor and operating system
+# Editors and operating systems
 .vscode/
 .idea/
+.vs/
+*.code-workspace
 .DS_Store
 Thumbs.db
 Desktop.ini
 *.swp
 *.swo
+*~
 
-# Temporary output
+# Logs, diagnostics, backups and temporary files
 *.log
 *.tmp
+*.temp
 *.bak
-=======
 *.orig
+*.rej
+*.stackdump
+debug/
+screenshots/
+crash-dumps/
+*.dmp
+
+# Local build and development outputs
+.local/
+.cache/
+artifacts/
+coverage/
 =======
