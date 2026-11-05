@@ -31,6 +31,69 @@ Rust and Python are required for installation from source. WebCodex uses ordinar
 
 ## Installation
 
+### Recommended:````text
+FILE: README.md
+<<<<<<< SEARCH
+## Installation
+
+### 1. Install prerequisites
+=======
+## Installation
+
+### Recommended: Windows release (no Rust compiler needed Windows release (no Rust compiler needed)
+
+1. Download `)
+
+1. Download `webcodex-v1.2.0webcodex-v1.2.0-windows-x64.zip` from [GitHub Releases](https://github.com-windows-x64.zip` from [GitHub Releases](https://github.com/abdelkareemm/webcodex/releases).
+2. Extract it to/abdelkareemm/webcodex/releases).
+2. Extract it to a permanent folder, such as `C:\Tools\Web a permanent folder, such as `C:\Tools\WebCodex`.
+3. Install Python 3.9 or newerCodex`.
+3. Install Python 3.9 or newer if it is not already installed.
+4. Open Power if it is not already installed.
+4. Open PowerShell in the extracted `webcodex` folder and run:
+
+   ```Shell in the extracted `webcodex` folder and run:
+
+   ```powershell
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -powershell
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\install.ps1"
+   ```
+
+5File ".\install.ps1"
+   ```
+
+5. Open a new PowerShell window, change. Open a new PowerShell window, change into your coding project's directory into your coding project's directory, and run:
+
+   ```powershell
+   webcodex
+   ``, and run:
+
+   ```powershell
+   webcodex
+   ```
+
+The installer checks the included Rust`
+
+The installer checks the included Rust binaries, binaries, installs the Python Playwright installs the Python Playwright dependency, downloads Chromium, and registers a dependency, downloads Chromium, and registers a `web `webcodex` command for future terminal sessions.
+
+The extracted directory must remain in placecodex` command for future terminal sessions.
+
+The extracted directory must remain in place after installation. WebCod after installation. WebCodex uses its binaries andex uses its binaries and browser-sidecar source from that directory.
+
+If you need browser-sidecar source from that directory.
+
+If you need to authenticate to ChatGPT, launch WebCodex with its visible to authenticate to ChatGPT, launch WebCodex with its visible browser rather than `--headless`.
+
+### browser rather than `--headless`.
+
+### Alternative: Build from source
+
+The following instructions build WebCod Alternative: Build from source
+
+The following instructions build WebCodex yourself. Rust, Cargo, and Microsoft C++ex yourself. Rust, Cargo, and Microsoft C++ Build Tools are required only for this method.
+
+ Build Tools are required only for this method.
+
 ### 1. Install prerequisites
 
 Install Python and Rust from PowerShell:

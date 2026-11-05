@@ -1,0 +1,282 @@
+name assets when a `v*` tag is pushed.
+
+````text
+FILE: .github/workflows/release.yml
+<<<<<<< SEARCH
+=======
+name: Publish Web: Publish WebCodex
+
+on:
+  push:
+    tags:
+Codex
+
+on:
+  push:
+    tags:
+      - "v[0      - "v[0-9]*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+-9]*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-release:
+    name: Buildjobs:
+  windows-release:
+    name: Build Windows x64 release
+    runs-on: windows-latest
+    permissions Windows x64 release
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+   :
+      contents: read
+
+    steps:
+      - name: Check out source steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust builds
+        uses: Swatinem/r - name: Cache Rust builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            rustust-cache@v2
+        with:
+          workspaces: |
+            rust-core
+            rust-tui
+
+      - name: Set up Python
+       -core
+            rust-tui
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify "3.12"
+
+      - name: Verify release version
+        shell: pwsh
+        env release version
+        shell: pwsh
+        env:
+          GIT:
+          GIT_REF: ${{ github.ref_REF: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+        }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version run: |
+          $ErrorActionPreference = "Stop"
+          $version = (Get-Content pyproject.toml | = (Get-Content pyproject.toml | Select-String '^version = "([^"]+)"').Matches Select-String '^version = "([^"]+)"').Matches[0].Groups[1].Value
+          if ($env:EVENT_NAME[0].Groups[1].Value
+          if ($env:EVENT_NAME -eq "push" -and $env:GIT_REF -ne "refs -eq "push" -and $env:GIT_REF -ne "refs/tags/v$version") {
+            throw "Git/tags/v$version") {
+            throw "Git tag does not match pyproject.toml version $version"
+          tag does not match pyproject.toml version $version"
+          }
+          "WE }
+          "WEBCODEX_VERSION=$version" >> $env:GITHUB_ENV
+
+      - nameBCODEX_VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Install Python dependencies
+        run: python -m pip install -: Install Python dependencies
+        run: python -m pip install -e .
+
+      - name: Test Python sidee .
+
+      - name: Test Python sidecar
+        run: python -m unittest discover -s tests -v
+
+car
+        run: python -m unittest discover -s tests -v
+
+      - name: Test Rust core
+        run: cargo test --locked      - name: Test Rust core
+        run: cargo test --locked --manifest-path rust-core/Cargo.toml
+
+      - name: Test Rust --manifest-path rust-core/Cargo.toml
+
+      - name: Test Rust terminal
+        run: cargo test --locked --manifest-path rust-tui/C terminal
+        run: cargo test --locked --manifest-path rust-tui/Cargo.toml
+
+      - name:argo.toml
+
+      - name: Build Rust core
+        run: cargo build --locked --release --manifest-path rust-core/Cargo.toml
+
+      Build Rust core
+        run: cargo build --locked --release --manifest-path rust-core/Cargo.toml
+
+      - name: Build Rust terminal
+        run: cargo build --locked --release - name: Build Rust terminal
+        run: cargo build --locked --release --manifest-path rust-tui/Cargo.toml
+
+      - name: Package Windows release
+        shell: pwsh --manifest-path rust-tui/Cargo.toml
+
+      - name: Package Windows release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stagestage = Join-Path $PWD "release-stage"
+          $root = = Join-Path $PWD "release-stage"
+          $root = Join Join-Path $stage "webcodex"
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+
+          foreach ($file in-Path $stage "webcodex"
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+
+          foreach ($file in @("README.md", "LICENSE", "CHANGELOG.md", "pyproject.toml", "install.ps1", "webcodex @("README.md", "LICENSE", "CHANGELOG.md", "pyproject.toml", "install.ps1", "webcodex.cmd.cmd"))")) {
+ {
+                       Copy Copy--ItemItem $ $filefile $root
+          }
+
+          Copy-Item "webcodex" $root -Recurse
+
+          $core = Join-Path $root "rust-core\target\release"
+          $tui = Join-Path $root "rust-tui\target $root
+          }
+
+          Copy-Item "webcodex" $root -Recurse
+
+          $core = Join-Path $root "rust-core\target\release"
+          $tui = Join-Path $root "rust-tui\target\\releaserelease"
+"
+                   New New-Item -ItemType Directory -Force -Path $core, $tui | Out-Null
+
+          foreach ($name in @("webcodex-native.exe", "webcodex-core.exe")) {
+            $source = Join-Path "rust-core\target\release" $name
+            if (-not (Test-Path $source)) { throw "Missing Rust executable: $source" }
+            Copy-Item $source $core
+          }
+
+          $tuiSource = "rust-tui\target\release\webcodex-tui.exe"
+          if (-not (Test-Path $tuiSource)) { throw "Missing Rust TUI executable" }
+          Copy-Item -ItemType Directory -Force -Path $core, $tui | Out-Null
+
+          foreach ($name in @("webcodex-native.exe", "webcodex-core.exe")) {
+            $source = Join-Path "rust-core\target\release" $name
+            if (-not (Test-Path $source)) { throw "Missing Rust executable: $source" }
+            Copy-Item $source $core
+          }
+
+          $tuiSource = "rust-tui\target\release\webcodex-tui.exe"
+          if (-not (Test-Path $tuiSource)) { throw "Missing Rust TUI executable" }
+          Copy-Item $tuiSource $tui
+
+          & (Join-Path $core "webcodex-native.exe") --version
+          if ($LASTEXITCODE -ne 0) { throw "Native smoke test failed" }
+
+          $version = $env:WEBCODEX_VERSION
+          $zipName = "webcodex-v$version-windows-x64.zip"
+          New-Item -ItemType Directory -Force --Item $tuiSource $tui
+
+          & (Join-Path $core "webcodex-native.exe") --version
+          if ($LASTEXITCODE -ne 0) { throw "Native smoke test failed" }
+
+          $version = $env:WEBCODEX_VERSION
+          $zipName = "webcodex-v$version-windows-x64.zip"
+          New-Item -ItemType Directory -Force -Path "release-assets" | Out-Null
+          Compress-Archive -Path $root -DestinationPath (Join-Path "release-assets" $zipName) -CompressionLevel Optimal
+
+          $hash = (Get-FileHash (Join-Path "release-assets" $zipPath "release-assets" | Out-Null
+          Compress-Archive -Path $root -DestinationPath (Join-Path "release-assets" $zipName) -CompressionLevel Optimal
+
+          $hash = (Get-FileHash (Join-Path "release-assets" $zipName) -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $zipName" | Set-Content "release-assets\SHA256SUMS.txt" -Encoding ascii
+
+Name) -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $zipName" | Set-Content "release-assets\SHA256SUMS.txt" -Encoding ascii
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish GitHub Release
+    if: github.event_name == 'push'
+    needs: windows-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download verified artifacts
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish GitHub Release
+    if: github.event_name == 'push'
+    needs: windows-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download verified artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: release-assets
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: release-assets
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets          files: release-assets/*
+          generate_release_notes: true
+          fail_on_unmatched_files:/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: false true
+          draft: false
+          prerelease: false
+=======
