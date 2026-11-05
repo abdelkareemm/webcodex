@@ -1,0 +1,33 @@
+name: WebCodex native builds
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            rust-core
+            rust-tui
+      - run: cargo test --manifest-path rust-core/Cargo.toml
+      - run: cargo test --manifest-path rust-tui/Cargo.toml
+      - run: cargo build --release --manifest-path rust-core/Cargo.toml
+      - run: cargo build --release --manifest-path rust-tui/Cargo.toml
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e . pytest
+      - run: python -m pytest -q

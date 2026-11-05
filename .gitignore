@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Rust
+target/
+**/target/
+*.pdb
+
+# Keep Cargo.lock files for reproducible application builds.
+
+# WebCodex local state
+.webcodex/
+**/.webcodex/
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+
+# Browser state and Playwright output
+browser-profile/
+browser-profiles/
+playwright-profile/
+playwright-report/
+test-results/
+trace.zip
+*.har
+*.webm
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.token
+credentials.json
+secrets.json
+auth.json
+storage-state.json
+storage_state.json
+
+# Editor and operating system
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+
+# Temporary output
+*.log
+*.tmp
+*.bak
+=======
+*.orig
+=======

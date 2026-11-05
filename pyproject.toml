@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "webcodex"
+version = "1.2.0"
+description = "Rust-native WebCodex agent with Python Playwright sidecar"
+requires-python = ">=3.9"
+dependencies = ["playwright>=1.40"]
+
+[project.scripts]
+webcodex = "webcodex.cli:main"
+
+[tool.setuptools]
+packages = ["webcodex"]

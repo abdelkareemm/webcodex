@@ -1,0 +1,13 @@
+[package]
+name = "webcodex-tui"
+version = "1.2.0"
+edition = "2021"
+description = "Rust terminal frontend for WebCodex"
+license = "Apache-2.0"
+
+[dependencies]
+crossterm = "0.28"
+ratatui = "0.29"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+unicode-width = "0.2"
