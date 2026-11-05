@@ -25,6 +25,7 @@ ENV/
 # Rust build artifacts
 target/
 **/target/
+rust-core/target-update/
 *.pdb
 *.rlib
 *.rmeta
@@ -111,4 +112,3 @@ crash-dumps/
 .cache/
 artifacts/
 coverage/
-=======

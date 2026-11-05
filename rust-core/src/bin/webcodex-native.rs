@@ -29,7 +29,11 @@ fn core_executable()->PathBuf {
 }
 fn tui_executable()->PathBuf {
     let name=if cfg!(windows){"webcodex-tui.exe"}else{"webcodex-tui"};
-    env::var_os("WEBCODEX_RUST_TUI").map(PathBuf::from).unwrap_or_else(||Path::new(env!("CARGO_MANIFEST_DIR")).join("../rust-tui/target/release").join(name))
+    if let Some(path)=env::var_os("WEBCODEX_RUST_TUI"){return PathBuf::from(path);}
+    if let Some(path)=env::current_exe().ok().and_then(|p|p.parent().map(|d|d.join(name))){
+        if path.is_file(){return path;}
+    }
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rust-tui/target/release").join(name)
 }
 struct JsonChild {child:Child,stdin:ChildStdin,stdout:BufReader<ChildStdout>}
 impl JsonChild {
@@ -260,7 +264,7 @@ fn parse_options()->Result<Options,String>{
             "--headless"=>o.headless=true,"--temporary"=>o.temporary=true,
             "-s"|"--sandbox"=>{let mode=option_value(&mut args,&arg)?;if mode!="danger-full-access"{return Err(format!("unsupported sandbox mode: {mode}"))}o.allow_run=true},
             "-a"|"--ask-for-approval"=>{let mode=option_value(&mut args,&arg)?;if mode!="never"&&mode!="on-request"{return Err(format!("unsupported approval policy: {mode}"))}o.approve_never=mode=="never"},
-            "--version"=>{println!("webcodex 1.2.0 (Rust)");std::process::exit(0)},
+            "--version"=>{println!("webcodex 1.2.1 (Rust)");std::process::exit(0)},
             "--help"|"-h"=>{println!("WebCodex Rust CLI\n  webcodex resume [-s danger-full-access -a never] (select saved thread)\n  webcodex resume <ChatGPT-UUID> [-s danger-full-access -a never]\n  webcodex resume https://chatgpt.com/c/<UUID>\n  webcodex resume --last (resume latest without picker)\n  webcodex import-codex [--list | --session <id>] [--codex-home <dir>]\n  -C <folder>  --model <model>  --browser <chrome|msedge|chromium>\n  --thread-id <id>  --list-threads  --login  --max-turns <n>  -i\n  --no-tui  --force  --allow-run  --yes\n\n{HELP}");std::process::exit(0)},
             "--manual"|"--dry-run"=>return Err(format!("{arg} is available through the Python compatibility CLI")),
             "--"=>{o.tasks.extend(args);break},

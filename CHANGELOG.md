@@ -1,6 +1,18 @@
 # WebCodex release history
 
-**Current version: 1.2.0 — Release #22 (November 5, 2026)**
+## 1.2.1 - Release #23 - 2026-11-05
+
+Maintenance release focused on response integrity and safe automatic editing.
+
+- Preserve captured ChatGPT response streams instead of replacing them with DOM text.
+- Reject incomplete response streams and unverified DOM edit instructions.
+- Reject malformed, unfenced, incomplete, and nested edit blocks.
+- Roll back all edits to a file when any edit in its batch fails.
+- Add regression tests for transport integrity, parser validation, and atomic patching.
+- Preserve existing resume, Codex import, and terminal functionality.
+
+
+**Current version: 1.2.1 - Release #23 (November 5, 2026)**
 
 The 1.1.0 update adds interactive session selection and Codex CLI import to the 1.0.0 Rust-native milestone, which consolidates the prior 0.3.3 development snapshots into a Rust-native agent and Rust terminal interface, with Python retained for Playwright browser communication. It includes the latest terminal redraw improvements to address stale text in Windows Terminal and VS Code terminals.
 

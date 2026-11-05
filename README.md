@@ -31,6 +31,29 @@ Rust and Python are required for installation from source. WebCodex uses ordinar
 
 ## Installation
 
+### Windows ZIP release (no Rust compiler required)
+
+Download the Windows ZIP from the [GitHub Releases page](https://github.com/abdelkareemm/webcodex/releases) and extract it to a permanent folder.
+
+Install Python 3.9 or newer. Open PowerShell in the extracted WebCodex directory and run:
+
+```powershell
+python -m pip install -e .
+python -m playwright install chromium
+python -m webcodex --version
+```
+
+To start WebCodex in your project directory:
+
+```powershell
+cd "C:\path\to\your\project"
+webcodex
+```
+
+The ZIP includes the compiled Rust executables. Keep the extracted directory intact. You do not need Rust, Cargo, or MSVC to use the prebuilt release.
+
+### Build from source
+
 ### 1. Install prerequisites
 
 Install Python and Rust from PowerShell:
