@@ -1,26 +1,21 @@
-name assets when a `v*` tag is pushed.
+name: Publish WebCodex
+
+on:
+  push existing release.
 
 ````text
 FILE: .github/workflows/release.yml
 <<<<<<< SEARCH
 =======
-name: Publish Web: Publish WebCodex
+name: Publish WebCodex
 
 on:
   push:
     tags:
-Codex
-
-on:
-  push:
+      - "v[0-9]*"
+  workflow:
     tags:
-      - "v[0      - "v[0-9]*"
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
--9]*"
+      - "v[0-9]*"
   workflow_dispatch:
 
 permissions:
@@ -28,18 +23,17 @@ permissions:
 
 jobs:
   windows-release:
-    name: Buildjobs:
+   _dispatch:
+
+permissions:
+  contents: read
+
+jobs:
   windows-release:
-    name: Build Windows x64 release
+    name: Build Windows x64
     runs-on: windows-latest
-    permissions Windows x64 release
+    name: Build Windows x64
     runs-on: windows-latest
-    permissions:
-      contents: read
-
-   :
-      contents: read
-
     steps:
       - name: Check out source steps:
       - name: Check out source
@@ -55,228 +49,236 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust builds
-        uses: Swatinem/r - name: Cache Rust builds
+        uses: Swatinem/rust-cache - name: Cache Rust builds
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            rustust-cache@v2
+            rust-core
+@v2
         with:
           workspaces: |
             rust-core
             rust-tui
 
-      - name: Set up Python
-       -core
-            rust-tui
+      - name: Install Python
+        uses: actions            rust-tui
 
-      - name: Set up Python
+      - name: Install Python
         uses: actions/setup-python@v5
         with:
-          python-version: uses: actions/setup-python@v5
+          python-version: "3./setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Verify "3.12"
-
-      - name: Verify release version
+      - name: Verify version
         shell: pwsh
-        env release version
+       12"
+
+      - name: Verify version
         shell: pwsh
         env:
-          GIT:
-          GIT_REF: ${{ github.ref_REF: ${{ github.ref }}
-          EVENT_NAME: ${{ github.event_name }}
-        }}
+          GIT_REF: ${{ github.ref }}
+          EVENT_NAME: $ env:
+          GIT_REF: ${{ github.ref }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
+          $ErrorActionPreference ={{ github.event_name }}
+        run: |
           $ErrorActionPreference = "Stop"
-          $version run: |
-          $ErrorActionPreference = "Stop"
-          $version = (Get-Content pyproject.toml | = (Get-Content pyproject.toml | Select-String '^version = "([^"]+)"').Matches Select-String '^version = "([^"]+)"').Matches[0].Groups[1].Value
-          if ($env:EVENT_NAME[0].Groups[1].Value
-          if ($env:EVENT_NAME -eq "push" -and $env:GIT_REF -ne "refs -eq "push" -and $env:GIT_REF -ne "refs/tags/v$version") {
-            throw "Git/tags/v$version") {
-            throw "Git tag does not match pyproject.toml version $version"
-          tag does not match pyproject.toml version $version"
+          $match = Select-String -Path "py "Stop"
+          $match = Select-String -Path "pyproject.toml" -Pattern '^versionproject.toml" -Pattern '^version = "([^"]+)"' | Select-Object -First 1 = "([^"]+)"' | Select-Object -First 1
+          if (-not $match) { throw "Could
+          if (-not $match) { throw "Could not find project version" }
+          $version = $match.Matches[0 not find project version" }
+          $version = $match.Matches[0].Groups[1].Value
+          if ($env:EVENT_NAME -eq].Groups[1].Value
+          if ($env:EVENT_NAME -eq "push" -and $env:GIT_REF -ne "refs/tags "push" -and $env:GIT_REF -ne "refs/tags/v$version") {
+            throw "Tag must/v$version") {
+            throw "Tag must match version v$version"
           }
-          "WE }
+          "WE match version v$version"
+          }
           "WEBCODEX_VERSION=$version" >> $env:GITHUB_ENV
 
       - nameBCODEX_VERSION=$version" >> $env:GITHUB_ENV
 
       - name: Install Python dependencies
-        run: python -m pip install -: Install Python dependencies
+        run: python -m pip install -e: Install Python dependencies
         run: python -m pip install -e .
 
-      - name: Test Python sidee .
+      - name: Test Python
+        run: python -m unittest discover .
 
-      - name: Test Python sidecar
-        run: python -m unittest discover -s tests -v
-
-car
+      - name: Test Python
         run: python -m unittest discover -s tests -v
 
       - name: Test Rust core
-        run: cargo test --locked      - name: Test Rust core
+        run -s tests -v
+
+      - name: Test Rust core
         run: cargo test --locked --manifest-path rust-core/Cargo.toml
 
-      - name: Test Rust --manifest-path rust-core/Cargo.toml
+     : cargo test --locked --manifest-path rust-core/Cargo.toml
 
-      - name: Test Rust terminal
-        run: cargo test --locked --manifest-path rust-tui/C terminal
+      - name: Test Rust TUI
+        run: cargo test --locked -- - name: Test Rust TUI
         run: cargo test --locked --manifest-path rust-tui/Cargo.toml
 
-      - name:argo.toml
+      - name: Build Rustmanifest-path rust-tui/Cargo.toml
 
       - name: Build Rust core
+        run: cargo build --locked --release --manifest-path rust-core core
         run: cargo build --locked --release --manifest-path rust-core/Cargo.toml
 
-      Build Rust core
-        run: cargo build --locked --release --manifest-path rust-core/Cargo.toml
+      - name: Build Rust TUI
+        run/Cargo.toml
 
-      - name: Build Rust terminal
-        run: cargo build --locked --release - name: Build Rust terminal
-        run: cargo build --locked --release --manifest-path rust-tui/Cargo.toml
+      - name: Build Rust TUI
+        run: cargo build --locked --release --manifest-path rust-tui/Cargo.tom: cargo build --locked --release --manifest-path rust-tui/Cargo.toml
 
-      - name: Package Windows release
-        shell: pwsh --manifest-path rust-tui/Cargo.toml
+      - name: Create Windows distribution
+        shell: pwsh
+l
 
-      - name: Package Windows release
+      - name: Create Windows distribution
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $
-        run: |
+          $stage        run: |
           $ErrorActionPreference = "Stop"
-          $stagestage = Join-Path $PWD "release-stage"
-          $root = = Join-Path $PWD "release-stage"
-          $root = Join Join-Path $stage "webcodex"
-          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          $stage = Join-Path $PWD "release-stage\web = Join-Path $PWD "release-stage\webcodex"
+          $assets = Join-Path $PWD "codex"
+          $assets = Join-Path $PWD "release-assets"
+          New-Item -ItemType Directory -Force -Path $release-assets"
+          New-Item -ItemType Directory -Force -Path $stage, $assets | Out-Null
 
-          foreach ($file in-Path $stage "webcodex"
-          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          foreach ($file in @("READMEstage, $assets | Out-Null
 
-          foreach ($file in @("README.md", "LICENSE", "CHANGELOG.md", "pyproject.toml", "install.ps1", "webcodex @("README.md", "LICENSE", "CHANGELOG.md", "pyproject.toml", "install.ps1", "webcodex.cmd.cmd"))")) {
- {
-                       Copy Copy--ItemItem $ $filefile $root
+          foreach ($file in @("README.md", "LICENSE", "CHANGELOG.md", "pyproject.toml.md", "LICENSE", "CHANGELOG.md", "pyproject.toml", "install.ps1", "webcodex.cmd")) {
+           ", "install.ps1", "webcodex.cmd")) {
+            Copy-Item -LiteralPath $file -Destination $stage Copy-Item -LiteralPath $file -Destination $stage
           }
 
-          Copy-Item "webcodex" $root -Recurse
-
-          $core = Join-Path $root "rust-core\target\release"
-          $tui = Join-Path $root "rust-tui\target $root
+          $pythonDir = Join-Path $stage "webcod
           }
 
-          Copy-Item "webcodex" $root -Recurse
+          $pythonDir = Join-Path $stage "webcodex"
+          New-Item -ItemType Directory -Force -Path $pythonex"
+          New-Item -ItemType Directory -Force -Path $pythonDir | Out-Null
+          Get-ChildItem -PathDir | Out-Null
+          Get-ChildItem -Path "webcodex" -Filter "*. "webcodex" -Filter "*.py" -File | ForEach-Object {
+            Copypy" -File | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination $pythonDir
+-Item -LiteralPath $_.FullName -Destination $pythonDir
+          }
 
-          $core = Join-Path $root "rust-core\target\release"
-          $tui = Join-Path $root "rust-tui\target\\releaserelease"
-"
-                   New New-Item -ItemType Directory -Force -Path $core, $tui | Out-Null
+          $coreDir = Join-Path $stage "rust-core\t          }
+
+          $coreDir = Join-Path $stage "rust-core\target\release"
+          $tuiDir = Join-Path $stage "arget\release"
+          $tuiDir = Join-Path $stage "rust-tui\target\release"
+          New-Item -ItemType Directoryrust-tui\target\release"
+          New-Item -ItemType Directory -Force -Path $coreDir, $tuiDir | Out-Null -Force -Path $coreDir, $tuiDir | Out-Null
+
+          foreach ($name in @("webcodex-native.exe", "web
 
           foreach ($name in @("webcodex-native.exe", "webcodex-core.exe")) {
+            $source = Join-Path "rust-corecodex-core.exe")) {
             $source = Join-Path "rust-core\target\release" $name
-            if (-not (Test-Path $source)) { throw "Missing Rust executable: $source" }
-            Copy-Item $source $core
+            if (-not (Test-Path\target\release" $name
+            if (-not (Test-Path -LiteralPath $source)) { throw "Missing $ -LiteralPath $source)) { throw "Missing $source" }
+            Copy-Item -LiteralPath $source -Destination $coresource" }
+            Copy-Item -LiteralPath $source -Destination $coreDir
           }
 
-          $tuiSource = "rust-tui\target\release\webcodex-tui.exe"
-          if (-not (Test-Path $tuiSource)) { throw "Missing Rust TUI executable" }
-          Copy-Item -ItemType Directory -Force -Path $core, $tui | Out-Null
-
-          foreach ($name in @("webcodex-native.exe", "webcodex-core.exe")) {
-            $source = Join-Path "rust-core\target\release" $name
-            if (-not (Test-Path $source)) { throw "Missing Rust executable: $source" }
-            Copy-Item $source $core
+          $tui = "rust-tui\target\Dir
           }
 
-          $tuiSource = "rust-tui\target\release\webcodex-tui.exe"
-          if (-not (Test-Path $tuiSource)) { throw "Missing Rust TUI executable" }
-          Copy-Item $tuiSource $tui
+          $tui = "rust-tui\target\release\webcodex-tui.exe"
+          if (-not (Test-Pathrelease\webcodex-tui.exe"
+          if (-not (Test-Path -LiteralPath $tui)) { throw "Missing $tui" }
+ -LiteralPath $tui)) { throw "Missing $tui" }
+          Copy-Item -LiteralPath $tui -Destination $tuiDir          Copy-Item -LiteralPath $tui -Destination $tuiDir
 
-          & (Join-Path $core "webcodex-native.exe") --version
-          if ($LASTEXITCODE -ne 0) { throw "Native smoke test failed" }
+          & (Join-Path $coreDir "webcodex-native.exe
 
-          $version = $env:WEBCODEX_VERSION
-          $zipName = "webcodex-v$version-windows-x64.zip"
-          New-Item -ItemType Directory -Force --Item $tuiSource $tui
+          & (Join-Path $coreDir "webcodex-native.exe") --version
+          if ($LASTEXITCODE -ne 0) {") --version
+          if ($LASTEXITCODE -ne 0) { throw "Native executable smoke test failed" }
 
-          & (Join-Path $core "webcodex-native.exe") --version
-          if ($LASTEXITCODE -ne 0) { throw "Native smoke test failed" }
+          $zip throw "Native executable smoke test failed" }
 
-          $version = $env:WEBCODEX_VERSION
-          $zipName = "webcodex-v$version-windows-x64.zip"
-          New-Item -ItemType Directory -Force -Path "release-assets" | Out-Null
-          Compress-Archive -Path $root -DestinationPath (Join-Path "release-assets" $zipName) -CompressionLevel Optimal
+          $zipName = "webcodex-v$env:WEBCODEX_VERSION-wName = "webcodex-v$env:WEBCODEX_VERSION-windows-x64.zip"
+          $zipPath = Join-Path $assets $indows-x64.zip"
+          $zipPath = Join-Path $assets $zipName
+          Compress-Archive -Path $stagezipName
+          Compress-Archive -Path $stage -DestinationPath $zipPath -CompressionLevel Optimal
 
-          $hash = (Get-FileHash (Join-Path "release-assets" $zipPath "release-assets" | Out-Null
-          Compress-Archive -Path $root -DestinationPath (Join-Path "release-assets" $zipName) -CompressionLevel Optimal
+          $hash = -DestinationPath $zipPath -CompressionLevel Optimal
 
-          $hash = (Get-FileHash (Join-Path "release-assets" $zipName) -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $zipName" | Set-Content "release-assets\SHA256SUMS.txt" -Encoding ascii
+          $hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256). (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $zipName" | SetHash.ToLowerInvariant()
+          "$hash  $zipName" | Set-Content -LiteralPath (Join-Path $assets "SHA256SUMS-Content -LiteralPath (Join-Path $assets "SHA256SUMS.txt") -Encoding ascii
 
-Name) -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $zipName" | Set-Content "release-assets\SHA256SUMS.txt" -Encoding ascii
+      - name: Upload Windows distribution
+        uses.txt") -Encoding ascii
 
-      - name: Upload release artifacts
+      - name: Upload Windows distribution
         uses: actions/upload-artifact@v4
         with:
-          name: windows-release
+          name: web: actions/upload-artifact@v4
+        with:
+          name: webcodex-windows-x64
+          path: release-assets/*
+codex-windows-x64
           path: release-assets/*
           if-no-files-found: error
           retention-days: 30
 
-  publish:
-    name: Publish GitHub Release
-    if: github.event_name == 'push'
-    needs: windows-release
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download verified artifacts
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-release
-          path: release-assets/*
-          if-no-files-found: error
+           if-no-files-found: error
           retention-days: 30
 
   publish:
     name: Publish GitHub Release
+    if: github.event_name publish:
+    name: Publish GitHub Release
     if: github.event_name == 'push'
+    needs: windows-release
+    runs-on: ubuntu-l == 'push'
     needs: windows-release
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
-      - name: Download verified artifacts
+      - nameatest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Windows distribution
+        uses: actions/download-artifact@v4
+: Download Windows distribution
         uses: actions/download-artifact@v4
         with:
-          name: windows-release
+          name: webcodex-windows-x64
+          path        with:
+          name: webcodex-windows-x64
           path: release-assets
 
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
-        with:
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-release
-          path: release-assets
+      - name: Create GitHub Release
+        uses:: release-assets
 
-      - name: Publish release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release-assets          files: release-assets/*
+          files: release softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
           generate_release_notes: true
-          fail_on_unmatched_files:/*
+          fail_on_unmatched_files:-assets/*
           generate_release_notes: true
           fail_on_unmatched_files: true
           draft: false
-          prerelease: false true
+          prerelease: false
+>>>>>>> REPLACE true
           draft: false
           prerelease: false
-=======

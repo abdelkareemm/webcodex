@@ -1,138 +1,153 @@
-# WebCodex Windows installer for SEARCH
+, and registers a command without requiring Rust or Cargo.
+
+````text
+FILE: install.ps1
+<<<<<<< SEARCH
 =======
-# WebCodex Windows installer for precompiled GitHub precompiled GitHub releases.
-# Rust/Cargo is not required for this installation path releases.
-# Rust/Cargo is not required for this installation path.
 $ErrorActionPreference = "Stop"
 
-$root = Split-.
-$ErrorActionPreference = "Stop"
+$root = Split-Path -Parent$ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$native = Join-Path -Parent $MyInvocation.MyCommand.Path
-$native = Join-Path $root "rust-core\target\release\webcodex-native.exe"
-Path $root "rust-core\target\release\webcodex-native.exe"
-$tui = Join-Path $root "rust-tui\target\release$tui = Join-Path $root "rust-tui\target\release\webcodex-tui.exe"
-$worker\webcodex-tui.exe"
-$worker = Join-Path $root "rust-core\target\release\webcodex = Join-Path $root "rust-core\target\release\webcodex-core.exe"
+$native = Join $MyInvocation.MyCommand.Path
+$native = Join-Path $root "rust-core\target\release\webcodex-native.exe-Path $root "rust-core\target\release\webcodex-native.exe"
+$core = Join-Path $root "rust"
+$core = Join-Path $root "rust-core\target\release\webcodex-core.exe"
+$tui = Join--core\target\release\webcodex-core.exe"
+$tui = Join-Path $root "rust-tui\target\release\webcodex-tuiPath $root "rust-tui\target\release\webcodex-tui.exe"
 
-Write-Host ""
-Write-Host "WebCod-core.exe"
-
-Write-Host ""
 Write-Host "WebCodex Windows Installer"
-Write-Host "-------------------------ex Windows Installer"
-Write-Host "-------------------------"
 
-foreach ($file in"
+.exe"
 
-foreach ($file in @($native, $tui, $worker)) {
-    if (-not @($native, $tui, $worker)) {
-    if (-not (Test-Path $file)) {
-        throw "Missing compiled executable: $ (Test-Path $file)) {
-        throw "Missing compiled executable: $file. Download the Windows release ZIP, not the source archive."
+Write-Host "WebCodex Windows Installer"
+
+foreach ($file in @($native, $core, $tui))foreach ($file in @($native, $core, $tui)) {
+    if (-not (Test-Path -LiteralPath $file)) {
+    if (-not (Test-Path -LiteralPath $file)) {
+        throw "Missing binary {
+        throw "Missing binary: $file. Download the compiled Windows release ZIP instead: $file. Download the compiled Windows release ZIP instead of the source archive."
     }
 }
 
-if (-not (Get-Command python -Errorfile. Download the Windows release ZIP, not the source archive."
+if (-not (Get-Command python of the source archive."
     }
 }
 
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
-    throw "Python 3.9Action SilentlyContinue)) {
-    throw "Python 3.9+ is required. Install Python, reopen PowerShell and rerun this installer."
+    throw "Python is -ErrorAction SilentlyContinue)) {
+    throw "Python is not available. Install Python 3.9 not available. Install Python 3.9 or newer and reopen PowerShell."
 }
 
-& python+ is required. Install Python, reopen PowerShell and rerun this installer."
+& or newer and reopen PowerShell."
 }
 
-& python -c "import sys; sys.exit(0 if sys.version_info >= -c "import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)"
+& python -c "import sys; sys.exit(0 if sys.version_info >= python -c "import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)"
 if ($LASTEXITCODE - (3, 9) else 1)"
 if ($LASTEXITCODE -ne 0) {
-    throw "WebCodne 0) {
-    throw "WebCodex requires Python 3.9 or newer."
+    throw "Python 3.9 or newer isne 0) {
+    throw "Python 3.9 or newer is required."
 }
 
-Write-Host "Installingex requires Python 3.9 or newer."
+Write-Host "Installing Python browser required."
 }
 
-Write-Host "Installing WebCodex Python sidecar..."
-& python -m pip install - WebCodex Python sidecar..."
+Write-Host "Installing Python browser-sidecar dependencies..."
+& python -m pip-sidecar dependencies..."
 & python -m pip install -e $root
+if ($LASTEXITCODE -ne 0) install -e $root
 if ($LASTEXITCODE -ne 0) {
-   e $root
-if ($LASTEXITCODE -ne 0) {
-    throw "Python package installation failed."
+    throw "Python dependency installation failed."
 }
 
-Write-Host "Installing Playwright Chromium throw "Python package installation failed."
+Write-Host {
+    throw "Python dependency installation failed."
 }
 
-Write-Host "Installing Playwright Chromium..."
+Write-Host "Installing Chromium for Playwright..."
+& python -m "Installing Chromium for Playwright..."
 & python -m playwright install chromium
-if ($LASTEXITCODE -ne..."
-& python -m playwright install chromium
 if ($LASTEXITCODE -ne 0) {
-    throw "Chromium 0) {
-    throw "Chromium installation failed."
+    playwright install chromium
+if ($LASTEXITCODE -ne 0) {
+    throw "Playwright Chromium installation failed."
 }
 
-Write- installation failed."
+Write-Host " throw "Playwright Chromium installation failed."
 }
 
-Write-Host "Checking native executable..."
+Write-Host "Checking the native application..."
 & $native --version
-Host "Checking native executable..."
+if ($LASTEXITCODEChecking the native application..."
 & $native --version
 if ($LASTEXITCODE -ne 0) {
-    throw "WebCodif ($LASTEXITCODE -ne 0) {
-    throw "WebCodex native executable failed verification."
+    throw "Native executable verification failed."
 }
 
-$binex native executable failed verification."
+$ -ne 0) {
+    throw "Native executable verification failed."
 }
 
 $bin = Join-Path $env:LOCALAPPDATA "WebCodex\bin = Join-Path $env:LOCALAPPDATA "WebCodex\bin"
-New-Item -ItemType Directory -Force -Path $bin | Out"
+New-Item -ItemType Directory -Force -Path $bin |bin"
 New-Item -ItemType Directory -Force -Path $bin | Out-Null
-Copy-Item (Join-Path $root "webcodex-Null
-Copy-Item (Join-Path $root "webcodex.cmd") (Join-Path $bin "webcodex.cmd") -Force.cmd") (Join-Path $bin "webcodex.cmd") -Force
 
-$userPath = [Environment]::GetEnvironmentVariable("Path", "User
+$launcher = Join-Path $bin "webcodex Out-Null
+
+$launcher = Join-Path $bin "webcodex.cmd"
+$python = (& python -c "import sys.cmd"
+$python = (& python -c "import sys; print(sys.executable)").Trim()
+if (-not $python); print(sys.executable)").Trim()
+if (-not $python) {
+    throw "Could not determine Python executable."
+}
+
+$script = '@ {
+    throw "Could not determine Python executable."
+}
+
+$script = '@echo off' + "`r`n" +
+   echo off' + "`r`n" +
+    '"' + $python + '" -m web '"' + $python + '" -m webcodex %*' + "`r`n" +
+    'exit /bcodex %*' + "`r`n" +
+    'exit /b %errorlevel%' + "`r`n"
+ %errorlevel%' + "`r`n"
+[System.IO.File]::WriteAllText($launcher, $script, [[System.IO.File]::WriteAllText($launcher, $script, [System.Text.Encoding]::ASCIISystem.Text.Encoding]::ASCII)
+
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User)
 
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-$entries = @($userPath -split ";" |")
+if (-not $userPath) { $userPath = "" }
+$entries")
+if (-not $userPath) { $userPath = "" }
 $entries = @($userPath -split ";" | Where-Object { $_ })
-if (-not Where-Object { $_ })
-if (-not ($entries | Where-Object { $_.TrimEnd("\") ($entries | Where-Object { $_.TrimEnd("\") -ieq $bin.TrimEnd("\") -ieq $bin.TrimEnd("\") })) {
-    [Environment]::SetEnvironmentVariable })) {
+$existing = @($userPath -split ";" | Where-Object { $_ })
+$existing = @($entries | Where-Object { $_.TrimEnd("\") = @($entries | Where-Object { $_.TrimEnd("\") -ieq $bin.TrimEnd("\") })
+
+if ($existing.Count -eq 0) {
+    [Environment -ieq $bin.TrimEnd("\") })
+
+if ($existing.Count -eq 0) {
     [Environment]::SetEnvironmentVariable(
+        "Path]::SetEnvironmentVariable(
         "Path",
-       (
-        "Path",
-        (($entries + (($entries + $bin) -join ";"),
+        (($entries + $bin) -join ";",
+        (($entries + $bin) -join ";"),
         "User"
     )
 }
 
-Write- $bin) -join ";"),
+Write"),
         "User"
     )
 }
 
 Write-Host ""
-Write-Host "WebCodex installation complete."
-Write-Host "Host ""
-Write-Host "WebCodex installation complete."
-Write-Host "Keep the extracted WebCodex directory in its currentKeep the extracted WebCodex directory in its current location."
-Write-Host "Open a NEW Power location."
-Write-Host "Open a NEW PowerShell window, navigate to your project and run:"
-WriteShell window, navigate to your project and run:"
-Write-Host "  webcodex"
-Write-Host ""
-Write-Host "  webcodex"
-Write-Host ""
-Write-Host "To resume a chat, run: webcodex-Host "To resume a chat, run: webcodex resume"
-Write-Host "On first launch, sign in resume"
-Write-Host "On first launch, sign in to ChatGPT in the browser if prompted."
-=======
+Write-Host "WebCodex installation completed."
+Write-Host-Host ""
+Write-Host "WebCodex installation completed."
+Write-Host "Keep the extracted WebCodex folder at "Keep the extracted WebCodex folder at: $root"
+Write-Host "Open: $root"
+Write-Host "Open a NEW PowerShell session and a NEW PowerShell session and run webcodex from your project directory."
+Write-Host "Sign in to run webcodex from your project directory."
+Write-Host "Sign in to ChatGPT in the visible browser if prompted."

@@ -1,70 +1,56 @@
 version: 2
 
-updates<<<<<<< SEARCH
+updates:
+  - package-ecosystemabot
+
+````text
+FILE: .github/dependabot.yml
+<<<<<<< SEARCH
 =======
 version: 2
 
 updates:
-  - package-ecosystem: "cargo:
-  - package-ecosystem: "cargo"
-    directory: "/rust-core"
-   "
-    directory: "/rust-core"
+  - package-ecosystem: cargo
+    directory: /: cargo
+    directory: /rust-core
     schedule:
-      interval: "weekly"
-    open-pull- schedule:
-      interval: "weekly"
+      interval: weekly
+    open-pull-rust-core
+    schedule:
+      interval: weekly
     open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
 
-requests-limit: 5
-    labels:
-      - "dependencies"
+  - package-ecosystem: cargo
+   requests-limit: 5
 
-  - package-ecosystem: "cargo"
-    directory: "/rust-t  - package-ecosystem: "cargo"
-    directory: "/rust-tui"
+  - package-ecosystem: cargo
+    directory: /rust-tui
     schedule:
-      interval: "weekly"
-    open-pull-ui"
+      interval: weekly
+    directory: /rust-tui
     schedule:
-      interval: "weekly"
+      interval: weekly
     open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
 
-  -requests-limit: 5
-    labels:
-      - "dependencies"
+  - package-ecosystem open-pull-requests-limit: 5
 
-  - package-ecosystem: "pip"
-    directory: "/"
+  - package-ecosystem: pip
+    directory: /
     schedule:
- package-ecosystem: "pip"
-    directory: "/"
+      interval: weekly
+   : pip
+    directory: /
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5      interval: "weekly"
+      interval: weekly
     open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
 
-  - package-ecosystem:
-    labels:
-      - "dependencies"
+  - package-ecos open-pull-requests-limit: 5
 
-  - package-ecosystem: "github-actions"
-    directory: "/"
+  - package-ecosystem: github-actions
+    directory: /
     schedule:
-      interval: " "github-actions"
-    directory: "/"
+      interval: weeklyystem: github-actions
+    directory: /
     schedule:
-      interval: "weekly"
+      interval: weekly
     open-pull-requests-limit: 5
-    labels:
-weekly"
-    open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-=======

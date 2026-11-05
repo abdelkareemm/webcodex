@@ -1,265 +1,283 @@
 # WebCodex
 
-**A Rust-powered coding agent that runs through ChatGPT.**
+[![
+FILE: README.md
+<<<<<<< SEARCH
+=======
+# WebCodex
 
-WebCodex brings a Codex-style terminal coding experience to your existing ChatGPT account. It uses Rust for the terminal interface and agent operations, with Python and Playwright handling browser communication.
+[![Build](https://github.com/abdelkBuild](https://github.com/abdelkareemm/webcodex/actions/workflows/build.yml/badge.svg)](httpsareemm/webcodex/actions/workflows/build.yml/badge.svg)](https://github.com/abdelkareemm/webcodex/actions/workflows/build://github.com/abdelkareemm/webcodex/actions/workflows/build.yml)
+[![Apache-2.0](https://img.yml)
+[![Apache-2.0](https://img.shields.io/badge/license-Apache--.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![Release2.0-blue)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/abdel](https://img.shields.io/github/v/release/abdelkareemm/webcodex)](https://github.com/abdelkkareemm/webcodex)](https://github.com/abdelkareemm/webcodex/releases)
 
-Built by **[abdelkareemm](https://github.com/abdelkareemm)**.
+**A Rust-powered terminalareemm/webcodex/releases)
 
-[GitHub Repository](https://github.com/abdelkareemm/webcodex) · [Releases](https://github.com/abdelkareemm/webcodex/releases) · [Changelog](CHANGELOG.md)
+**A Rust-powered terminal coding agent that coding agent that works through works through Chat ChatGPT.**
+
+Created by **[abdelkareemm](https://GPT.**
+
+Created by **[abdelkareemm](https://github.com/abdelkareemm)**.
+
+[Download releasesgithub.com/abdelkareemm)**.
+
+[Download releases](https://github.com/abdelk](https://github.com/abdelkareemm/webcodex/releases) | [areemm/webcodex/releases) | [Report anReport an issue](https://github.com/abdelkareemm/webcodex/issues issue](https://github.com/abdelkareemm/webcodex/issues) | [Changelog](CHANGELOG.md)
+
+Web) | [Changelog](CHANGELOG.md)
+
+WebCodex combines a native Rust terminal interface andCodex combines a native Rust terminal interface and coding agent with a Python Playwright browser side coding agent with a Python Playwright browser sidecar. It can work withcar. It can work with project files, run commands, apply edits project files, run commands, apply edits,, and continue conversations using an accessible ChatGPT account.
 
 ## Features
 
-- **Native Rust terminal UI** — Interactive conversation, scrolling, prompt history, and live responses.
-- **Project-aware coding** — Inspect project files, modify code, and execute shell commands.
-- **ChatGPT browser integration** — Use your signed-in ChatGPT account without configuring an API key.
-- **Resume conversations** — Continue WebCodex sessions or open accessible ChatGPT conversations by ID.
-- **Codex session importing** — Transfer context from locally saved Codex CLI conversations.
-- **Automatic file editing** — Apply generated edits with backups and undo support.
-- **Headless mode** — Run browser automation without displaying the browser window.
-- **Configurable permissions** — Choose when WebCodex asks before executing operations.
+- Native Rust terminal interface with streaming and continue conversations using an accessible ChatGPT account.
 
-## Requirements
+## Features
 
-- Windows 10 or 11
-- Python 3.9 or newer
-- Rust and Cargo
-- Microsoft C++ Build Tools (MSVC)
-- A ChatGPT account
+- Native Rust terminal interface with streaming responses.
+- Project-aware file editing, command execution, backups, and undo.
+ responses.
+- Project-aware file editing, command execution, backups, and undo.
+- Conversation picker, prompt history, scrolling, and search- Conversation picker, prompt history, scrolling, and search.
+- Resume accessible.
+- Resume accessible ChatGPT conversations by URL or conversation ID.
+- Import conversation ChatGPT conversations by URL or conversation ID.
+- Import conversation context from local Codex CLI sessions.
+- Optional head context from local Codex CLI sessions.
+- Optional headless Chromium browserless Chromium browser.
+- Configurable command approvals and execution permissions.
 
-Rust and Python are required for installation from source. WebCodex uses ordinary ChatGPT usage limits.
+## Installation.
+- Configurable command approvals and execution permissions.
 
 ## Installation
 
-### Recommended:````text
-FILE: README.md
-<<<<<<< SEARCH
-## Installation
+### Windows release (recommended)
 
-### 1. Install prerequisites
-=======
-## Installation
+**
 
-### Recommended: Windows release (no Rust compiler needed Windows release (no Rust compiler needed)
+### Windows release (recommended)
 
-1. Download `)
+**Requirements:** Windows 10/11, Python 3.9 orRequirements:** Windows 10/11, Python 3.9 or newer, and a ChatGPT account. newer, and a ChatGPT account. Rust and Cargo are not required for the compiled Windows package.
 
-1. Download `webcodex-v1.2.0webcodex-v1.2.0-windows-x64.zip` from [GitHub Releases](https://github.com-windows-x64.zip` from [GitHub Releases](https://github.com/abdelkareemm/webcodex/releases).
-2. Extract it to/abdelkareemm/webcodex/releases).
-2. Extract it to a permanent folder, such as `C:\Tools\Web a permanent folder, such as `C:\Tools\WebCodex`.
-3. Install Python 3.9 or newerCodex`.
-3. Install Python 3.9 or newer if it is not already installed.
-4. Open Power if it is not already installed.
-4. Open PowerShell in the extracted `webcodex` folder and run:
+1. Download Rust and Cargo are not required for the compiled Windows package.
 
-   ```Shell in the extracted `webcodex` folder and run:
+1. Download `webcodex-v1.2.0-windows-x64.zip` `webcodex-v1.2.0-windows-x64.zip` from [GitHub Releases](https:// from [GitHub Releases](https://github.com/abdelkareemm/webcodex/releases) once the release is available.
+2. Extract the ZIP togithub.com/abdelkareemm/webcodex/releases) once the release is available.
+2. Extract the ZIP to a permanent folder, such as `C:\Tools\WebCodex`.
+3 a permanent folder, such as `C:\Tools\WebCodex`.
+3. Open PowerShell inside the extracted `webcodex` folder.
+4.. Open PowerShell inside the extracted `webcodex` folder.
+4. Run:
 
    ```powershell
-   powershell.exe -NoProfile -ExecutionPolicy Bypass -powershell
+   powershell.exe -NoProfile -Execution Run:
+
+   ```powershell
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\install.ps1"
    ```
 
-5File ".\install.ps1"
+5.Policy Bypass -File ".\install.ps1"
    ```
 
-5. Open a new PowerShell window, change. Open a new PowerShell window, change into your coding project's directory into your coding project's directory, and run:
+5. Open a **new** PowerShell window and Open a **new** PowerShell window and navigate to your coding project:
 
    ```powershell
-   webcodex
-   ``, and run:
+   navigate to your coding project:
 
    ```powershell
+   cd "C:\path\to\your cd "C:\path\to\your\project"
    webcodex
    ```
 
-The installer checks the included Rust`
+Complete\project"
+   webcodex
+   ```
 
-The installer checks the included Rust binaries, binaries, installs the Python Playwright installs the Python Playwright dependency, downloads Chromium, and registers a dependency, downloads Chromium, and registers a `web `webcodex` command for future terminal sessions.
+Complete the ChatGPT browser sign the ChatGPT browser sign-in if prompted. Keep the extracted WebCodex directory in place after installation.
 
-The extracted directory must remain in placecodex` command for future terminal sessions.
+If a-in if prompted. Keep the extracted WebCodex directory in place after installation.
 
-The extracted directory must remain in place after installation. WebCod after installation. WebCodex uses its binaries andex uses its binaries and browser-sidecar source from that directory.
+If a compiled release is not available yet, follow the source installation below.
 
-If you need browser-sidecar source from that directory.
+### Build from source
 
-If you need to authenticate to ChatGPT, launch WebCodex with its visible to authenticate to ChatGPT, launch WebCodex with its visible browser rather than `--headless`.
+Install Python, compiled release is not available yet, follow the source installation below.
 
-### browser rather than `--headless`.
+### Build from source
 
-### Alternative: Build from source
+Install Python, Rust, and Microsoft C++ Build Tools:
 
-The following instructions build WebCod Alternative: Build from source
-
-The following instructions build WebCodex yourself. Rust, Cargo, and Microsoft C++ex yourself. Rust, Cargo, and Microsoft C++ Build Tools are required only for this method.
-
- Build Tools are required only for this method.
-
-### 1. Install prerequisites
-
-Install Python and Rust from PowerShell:
+```powershell
+winget install -- Rust, and Microsoft C++ Build Tools:
 
 ```powershell
 winget install --id Python.Python.3.12 -e
+winget install --idid Python.Python.3.12 -e
 winget install --id Rustlang.Rustup -e
+ Rustlang.Rustup -e
+wingwinget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCToolset install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
 ```
 
-If you do not already have Microsoft C++ Build Tools:
+Reopen PowerShell, then:
 
 ```powershell
-winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+git clone --includeRecommended"
 ```
 
-Restart PowerShell after installation.
-
-Confirm the tools are available:
-
-```powershell
-python --version
-cargo --version
-```
-
-### 2. Clone WebCodex
+Reopen PowerShell, then:
 
 ```powershell
 git clone https://github.com/abdelkareemm/webcodex.git
+cd web https://github.com/abdelkareemm/webcodex.git
 cd webcodex
-```
-
-### 3. Install Python dependencies and Playwright
-
-```powershell
+python -m pip install -e .
+python -m playwright installcodex
 python -m pip install -e .
 python -m playwright install chromium
-```
-
-### 4. Build WebCodex
-
-```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File chromium
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\verify-native.ps1"
 ```
 
-This runs the available tests and builds the release executables for the Rust core and terminal UI.
+Launch WebCodex from your project ".\verify-native.ps1"
+```
 
-### 5. Launch WebCodex
+Launch WebCodex from your project directory:
 
-Navigate to the project you want WebCodex to work on:
+```powershell
+cd "C:\path\to\your\ directory:
 
 ```powershell
 cd "C:\path\to\your\project"
 webcodex
 ```
 
-On first use, complete any required ChatGPT sign-in through the browser.
-
-You can now interact with WebCodex directly from your terminal.
-
-## Usage
-
-### Resume a previous WebCodex conversation
-
-```powershell
-webcodex resume
+## Commonproject"
+webcodex
 ```
 
-Select a conversation from the interactive picker.
+## Common commands
 
-To immediately resume the most recent session:
+| Command | Description |
+|---|---|
+| `webcod commands
 
-```powershell
-webcodex resume --last
-```
+| Command | Description |
+|---|---|
+| `webcodex` | Start a new session |
+| `webcodex resume` |ex` | Start a new session |
+| `webcodex resume` | Select an existing WebCodex conversation |
+| `webcodex resume -- Select an existing WebCodex conversation |
+| `webcodex resume --last` | Resume the most recent session |
+| `webcodex resume <last` | Resume the most recent session |
+| `webcodex resume <conversation-id>` | Open an accessible ChatGPT conversation |
+| `conversation-id>` | Open an accessible ChatGPT conversation |
+| `webcodex import-codex` | Import a local Codex CLI conversationwebcodex import-codex` | Import a local Codex CLI conversation |
+| `webcodex import-codex --list` | List local |
+| `webcodex import-codex --list` | List local Codex sessions |
+| `webcodex resume --headless` | Run Codex sessions |
+| `webcodex resume --headless` | Run without displaying the browser window without displaying the browser window |
+| `webcodex --version` | Print the installed version |
 
-### Resume a specific ChatGPT conversation
+For |
+| `webcodex --version` | Print the installed version |
 
-Use the conversation ID from its ChatGPT URL:
-
-```powershell
-webcodex resume 6aebe9ae-0a9c-83ea-8e91-da222befc0c1
-```
-
-Or provide the complete URL:
-
-```powershell
-webcodex resume https://chatgpt.com/c/6aebe9ae-0a9c-83ea-8e91-da222befc0c1
-```
-
-The conversation must be accessible through your signed-in ChatGPT account.
-
-### Import a Codex CLI conversation
-
-```powershell
-webcodex import-codex
-```
-
-Select a locally saved Codex session to transfer its conversational context into WebCodex.
-
-To list available Codex sessions:
+For example:
 
 ```powershell
-webcodex import-codex --list
-```
-
-Imported sessions create new ChatGPT conversations. They do not transfer the original Codex execution environment.
-
-### Run with automatic approvals
-
-```powershell
-webcodex resume -s danger-full-access -a never
-```
-
-This allows WebCodex to execute generated shell commands and modify files without local approval prompts.
-
-**Warning:** These options grant broad access to your files and computer. This mode does not provide operating-system sandboxing. Only use it when you accept those risks.
-
-### Run without a visible browser
+webcodex resume - example:
 
 ```powershell
 webcodex resume -s danger-full-access -a never --headless
 ```
 
-Headless mode hides the Playwright-controlled browser, not the WebCodex terminal interface. Browser authentication challenges may require visible mode.
+**Security warnings danger-full-access -a never --headless
+```
+
+**Security warning:** `danger-full-access` and `-a never` allow model-requested:** `danger-full-access` and `-a never` allow model-requested commands and edits without local approval prompts. There is no operating-system sandbox in this commands and edits without local approval prompts. There is no operating-system sandbox in this mode. Only use it when you accept the risks mode. Only use it when you accept the risks.
+
+WebCodex uses normal ChatGPT account access.
+
+WebCodex uses normal ChatGPT account access and remains subject to applicable usage limits.
+
+## Terminal and remains subject to applicable usage limits.
 
 ## Terminal shortcuts
 
-| Shortcut | Action |
+| Key | Action |
+|---|---|
+| Enter | Send shortcuts
+
+| Key | Action |
 |---|---|
 | Enter | Send message |
+| Alt+Enter | Insert message |
 | Alt+Enter | Insert newline |
-| Up / Down | Recall previous messages |
+| Up / Down | Recall sent newline |
+| Up / Down | Recall sent prompts |
+| Page Up / Page Down | Scroll conversation |
+| Mouse wheel | prompts |
 | Page Up / Page Down | Scroll conversation |
 | Mouse wheel | Scroll conversation |
-| End | Jump to latest message |
-| Ctrl+C | Clear current draft |
+| End | Jump to latest |
+ Scroll conversation |
+| End | Jump to latest |
+| Ctrl+C | Clear draft |
 | Ctrl+L | Clear visible transcript |
-| Ctrl+Q | Exit WebCodex |
+| Ctrl+C | Clear draft |
+| Ctrl+L | Clear visible transcript |
+| Ctrl+Q | Exit |
 
 ## Development
 
-WebCodex uses two Rust crates:
+-| Ctrl+Q | Exit |
 
-- `rust-core/` — Agent orchestration, CLI, sessions, project operations, patches, and commands.
-- `rust-tui/` — Native terminal interface.
+## Development
 
-The `webcodex/` Python package provides the browser transport, Playwright integration, and launcher.
+- `rust-core/` - Native `rust-core/` - Native CLI, agent, session CLI, agent, session storage, file operations, and command execution.
+- `rust-tui/` storage, file operations, and command execution.
+- `rust-tui/` - Terminal interface.
+- `webcodex/` - Python Playwright browser - Terminal interface.
+- `webcodex/` - Python Playwright browser sidecar and launcher.
+- `tests/` - Integration sidecar and launcher.
+- `tests/` - Integration and regression tests.
 
-Run the tests:
+Run Windows verification:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\verify-native.ps1"
+powershell and regression tests.
+
+Run Windows verification:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\verify-native.ps.exe -NoProfile -ExecutionPolicy Bypass -File ".\verify-native.ps1"
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development information and [SECURITY.md](SECURITY.md) for security considerations.
+See [CONTRIBUTING.md](CONTRIBUTING1"
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and [release.md), [SECURITY.md](SECURITY.md), and [release instructions](docs/RELEASING.md).
 
 ## Credits
 
-**Created and developed by [abdelkareemm](https://github.com/abdelkareemm).**
+**Web instructions](docs/RELEASING.md).
 
-WebCodex's terminal experience is inspired by [OpenAI Codex](https://github.com/openai/codex).
+## Credits
 
-WebCodex is an independent project and is not an official OpenAI product.
+**WebCodex is created andCodex is created and developed by [abdelkareemm]( developed by [abdelkareemm](https://github.com/abdelkareemm).**
 
-Any third-party source code incorporated into WebCodex remains subject to its original licenses and required attribution notices.
+Its terminal experiencehttps://github.com/abdelkareemm).**
+
+Its terminal experience is inspired by [OpenAI Codex](https://github.com/openai is inspired by [OpenAI Codex](https://github.com/openai/codex). WebCodex is independent/codex). WebCodex is independent and is not an official OpenAI product.
+
+Third-party and is not an official OpenAI product.
+
+Third-party code retains any required original copyright and code retains any required original copyright and license notices.
 
 ## License
 
-The Rust package manifests declare Apache-2.0. See the repository's LICENSE file once the full license text has been added.
+Licensed under [Apache License 2.0 license notices.
+
+## License
+
+Licensed under [Apache License 2.0](LICENSE).
