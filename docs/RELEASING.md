@@ -1,107 +1,129 @@
-# Publishing Web two documentation files
+# Publishing WebCodex
 
-````text
-FILE: docs/RELEASING.md
+WebING.md
 <<<<<<< SEARCH
 =======
 # Publishing WebCodex
 
-WebCodex uses semantic versioning, Git tags, and GitCodex
+WebCodex uses semantic versions and GitHub Actions for WindowsCodex uses semantic versions and GitHub Actions for Windows releases.
 
-WebCodex uses semantic versioning, Git tags, and GitHub Actions.
+## Before releasing
 
-## Before tagging
+- Update the version releases.
 
-Hub Actions.
+## Before releasing
 
-## Before tagging
+- Update the version consistently in both Rust manifests, consistently in both Rust manifests, the Python package, and version checks.
+- Update CHANGELOG.md with the Python package, and version checks.
+- Update CHANGELOG.md with user-visible user-visible changes.
+- Run the complete test suite.
+- Check that the working tree contains changes.
+- Run the complete test suite.
+- Check that the working tree contains no sensitive or generated files.
+- Confirm the Windows installer no sensitive or generated files.
+- Confirm the Windows installer and package layout.
 
-1. Update all application version strings1. Update all application version strings and release tests.
-2. Update and release tests.
-2. Update CHANGELOG.md.
-3. Run `verify-native.ps1` on Windows.
- CHANGELOG.md.
-3. Run `verify-native.ps1` on Windows.
-4. Review changes for secrets and generated files.
-5. Commit and4. Review changes for secrets and generated files.
-5. Commit and push the release-ready source.
- push the release-ready source.
-6. Check that GitHub Actions tests6. Check that GitHub Actions tests are passing.
+## Validate locally and package layout.
 
-## Build Windows are passing.
+## Validate locally
 
-## Build Windows artifacts without publishing
+From the repository root:
 
-Run the ** artifacts without publishing
+    powershell
 
-Run the **Publish WebCodex** workflow manually using the GitHub Actions tab.
+From the repository root:
 
-ThePublish WebCodex** workflow manually using the GitHub Actions tab.
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\.exe -NoProfile -ExecutionPolicy Bypass -File ".\verify-native.ps1"
 
-The manual run creates a downloadable workflow artifact but manual run creates a downloadable workflow artifact but does not create a GitHub Release.
+## Publish a release
 
-Use does not create a GitHub Release.
+Commit andverify-native.ps1"
 
-Use it to verify the ZIP and it to verify the ZIP and installer before publishing a versioned tag.
+## Publish a release
 
-## Publish a new version
+Commit and push the release-ready source before creating push the release-ready source before creating its tag.
 
-Create a installer before publishing a versioned tag.
+For WebCod its tag.
 
-## Publish a new version
+For WebCodex v1.2.0, the tagex v1.2.0, the tag is:
 
-Create a new version new version tag pointing to the verified release commit, then push the tag.
+    v1.2.0
 
-For example, tag pointing to the verified release commit, then push the tag.
+The GitHub Actions workflow `. is:
 
-For example, after updating every version reference to  after updating every version reference to 1.2.1:
+    v1.2.0
 
-    git tag v1.2.1
-1.2.1:
+The GitHub Actions workflow `.github/workflows/release.yml` runs whengithub/workflows/release.yml` runs when a matching version tag is pushed.
 
-    git tag v1.2.1
-    git push origin v1.2.1
+It will:
 
-The release workflow tests the source, builds Windows    git push origin v1.2.1
+ a matching version tag is pushed.
 
-The release workflow tests the source, builds Windows executables, packages a ZIP, generates executables, packages a ZIP, generates SHA256SUMS.txt, and publishes the GitHub Release.
+It will:
 
-Do not reuse SHA256SUMS.txt, and publishes the GitHub Release.
+1. Verify the tag matches the1. Verify the tag matches the package version.
+2. Run Python and Rust tests on Windows package version.
+2. Run Python and Rust tests on Windows.
+3. Build Rust release executables.
+4. Create the Windows.
+3. Build Rust release executables.
+4. Create the Windows release archive.
+5. Generate SHA256SUM release archive.
+5. Generate SHA256SUMS.txt.
+6. Publish a GitHub Release with theS.txt.
+6. Publish a GitHub Release with the downloadable archive and checksums.
 
-Do not reuse or force-update an existing published tag.
+If compilation or testing fails, the release publishing job downloadable archive and checksums.
 
-## Validate the or force-update an existing published tag.
+If compilation or testing fails, the release publishing job will not run.
 
-## Validate the release
+The workflow also supports manual artifact will not run.
 
-Download the ZIP from GitHub Releases into a clean directory.
+The workflow also supports manual artifact builds using builds using `workflow_dispatch`. Manual runs do not automatically `workflow_dispatch`. Manual runs do not automatically publish a GitHub Release.
 
-Run release
+## Validate the publish a GitHub Release.
 
-Download the ZIP from GitHub Releases into a clean directory.
+## Validate the published release published release
 
-Run `install.ps1` and confirm that:
+Download the Windows archive from Git
 
-- The Rust `install.ps1` and confirm that:
+Download the Windows archive from GitHub Releases and extractHub Releases and extract it into a fresh directory.
 
-- The Rust agent reports the expected version.
-- The `webcodex` command works in agent reports the expected version.
-- The `webcodex` command works in a new terminal.
-- The browser starts and can access a new terminal.
-- The browser starts and can access ChatGPT.
-- Messages can be sent and received.
-- File editing ChatGPT.
-- Messages can be sent and received.
-- File editing and session resume and session resume work in a disposable test work in a disposable test project.
+Run install.ps1 and verify that it into a fresh directory.
 
-The compiled Windows ZIP requires Python and project.
+Run install.ps1 and verify that:
 
-The compiled Windows ZIP requires Python and Playwright, but not Rust or Cargo.
+- The native executable reports the expected version.
+- The `:
 
-Do not publish browser profiles, Chat Playwright, but not Rust or Cargo.
+- The native executable reports the expected version.
+- The `webwebcodex` command works in acodex` command works in a new PowerShell session.
+- ChatGPT can be opened new PowerShell session.
+- ChatGPT can be opened using the Playwright using the Playwright browser.
+- A message can be sent and answered.
+ browser.
+- A message can be sent and answered.
+- An example project can be edited.
+-- An example project can be edited.
+- Existing sessions can be resumed.
 
-Do not publish browser profiles, ChatGPT cookies, private conversations, local session databases, or project credentialsGPT cookies, private conversations, local session databases, or project credentials.
+Do not claim a release is fully verified until the Existing sessions can be resumed.
 
-WebCodex is created by abdelkareemm; third-party license.
+Do not claim a release is fully verified until the fresh-install test passes.
 
-WebCodex is created by abdelkareemm; third-party license requirements must be preserved.
+## Distribution security
+
+Do not include fresh-install test passes.
+
+## Distribution security
+
+Do not include browser profiles, session databases, secrets, cookies, personal files, or preauthenticated browser profiles, session databases, secrets, cookies, personal files, or preauthenticated accounts.
+
+ accounts.
+
+Do not modify or replace a published release tag silently.Do not modify or replace a published release tag silently. If an already-published If an already-published version needs a fix, version needs a fix, issue a new patch version.
+
+WebCod issue a new patch version.
+
+WebCodex is created by abdelkareemm. Preserveex is created by abdelkareemm. Preserve any required third-party copyright and license notices.
+=======
