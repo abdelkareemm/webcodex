@@ -50,8 +50,6 @@ def main():
                 if request.get('op') == 'cancel':
                     cancelled.set()
                 else:
-                    if request.get('op') in ('send', 'recover'):
-                        cancelled.clear()
                     requests.put(request)
             except BaseException as exc:
                 requests.put({'op': '_read_error', 'error': f'{type(exc).__name__}: {exc}'})
@@ -101,11 +99,13 @@ def main():
                 elif op == 'current_url':
                     result = {'ok': True, 'url': transport.current_url()}
                 elif op == 'send':
+                    cancelled.clear()
                     def on_update(text):
                         emit({'kind': 'update', 'text': text})
                     answer = transport.send(request['text'], on_update=on_update, cancelled=cancelled.is_set)
                     result = {'ok': True, 'text': answer}
                 elif op == 'recover':
+                    cancelled.clear()
                     def on_update(text):
                         emit({'kind': 'update', 'text': text})
                     answer = transport.recover(on_update=on_update, cancelled=cancelled.is_set)

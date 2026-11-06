@@ -66,8 +66,12 @@ impl Inbox {
             let mut file=fs::OpenOptions::new()
                 .write(true).create_new(true).open(&inflight)
                 .map_err(|e|format!("Cannot create recovery record: {e}"))?;
-            file.write_all(&data).and_then(|_|file.sync_all())
-                .map_err(|e|format!("Recovery record write failed: {e}"))?;
+            let result=file.write_all(&data).and_then(|_|file.sync_all());
+            drop(file);
+            if let Err(e)=result {
+                let _=fs::remove_file(&inflight);
+                return Err(format!("Recovery record write failed: {e}"));
+            }
         }
         self.items.remove(0);
         if let Err(error)=self.save(){
@@ -204,6 +208,28 @@ mod tests {
         assert!(queue.pop().is_err());
         assert_eq!(queue.show(),"1. keep me");
 
+        let _=fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn existing_recovery_record_is_preserved(){
+        let root=std::env::temp_dir().join(format!("wc-inflight-{}",std::process::id()));
+        let _=fs::remove_dir_all(&root);
+        let mut queue=Inbox::open(&root);
+        queue.push("first".into()).unwrap();
+        queue.push("second".into()).unwrap();
+        assert_eq!(queue.pop().unwrap().as_deref(),Some("first"));
+
+        let record=root.join(".webcodex/queue-inflight.json");
+        let original=fs::read(&record).unwrap();
+        assert!(queue.pop().is_err());
+        assert_eq!(fs::read(&record).unwrap(),original);
+        assert_eq!(queue.len(),1);
+
+        queue.manage("/queue recover").unwrap();
+        assert_eq!(queue.len(),2);
+        assert_eq!(queue.pop().unwrap().as_deref(),Some("first"));
+        queue.acknowledge().unwrap();
         let _=fs::remove_dir_all(root);
     }
 

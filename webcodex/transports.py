@@ -547,10 +547,9 @@ class BrowserTransport:
                         try:
                             btn.click(timeout=3000)
                         except Exception:  # noqa: BLE001
-                            try:
-                                btn.click(force=True, timeout=3000)
-                            except Exception:  # noqa: BLE001
-                                btn.evaluate("e => e.click()")
+                            # The click may have succeeded before Playwright
+                            # reported an error. Do not risk submitting twice.
+                            pass
                         return
                 except Exception:  # noqa: BLE001
                     pass
@@ -642,11 +641,7 @@ class BrowserTransport:
                 or moved_to_chat
             )
 
-        steps = (
-            self._try_click_send,
-            lambda: self._press("Enter"),
-            lambda: self._press("Control+Enter"),
-        )
+        steps = (self._try_click_send,)
         for step in steps:
             self._check_cancel()
             step()

@@ -1,5 +1,7 @@
 # WebCodex release history
 
+The current development version is defined in `pyproject.toml` and the Rust Cargo manifests. This document records historical releases and is not automatically updated for every development version increment.
+
 ## 1.2.1 - Release #23 - 2026-11-05
 
 Maintenance release focused on response integrity and safe automatic editing.
@@ -12,7 +14,31 @@ Maintenance release focused on response integrity and safe automatic editing.
 - Preserve existing resume, Codex import, and terminal functionality.
 
 
-**Current version: 1.2.1 - Release #23 (November 5, 2026)**
+**Current development version: 1.4.67 (November 6, 2026)**
+
+## Changes since 1.3.0
+
+### 1.4.0 — Native agent and skills integration
+
+- Updated native-agent and skills integration code.
+- Synchronized Python, Rust core, and Rust TUI version metadata.
+
+### 1.4.1–1.4.67 — Reliability and recovery improvements
+
+- Added native filesystem backup, undo, recovery journals, and rollback safeguards.
+- Added `/recover-files` for recovering from interrupted undo operations.
+- Retire completed backups before deleting recovery snapshots, preventing accidental repeat undo.
+- Reject unsafe paths, symlink escapes, duplicate manifest entries, and backup-retirement collisions.
+- Improved persistent task queue recovery and interrupted-task handling.
+- Added command timeout handling and bounded stdout/stderr capture.
+- Strengthened Rust response parsing and regression coverage.
+- Fixed browser cancellation state handling at operation execution time.
+- Removed unsafe fallback Send clicks and keyboard submissions that could duplicate prompts.
+- Added native-launcher version checks and Windows launch support.
+- Expanded Rust core, terminal UI, and Python regression tests.
+- Added staged release builds and isolated native-worker startup verification.
+
+The v1.4.66 source release passed 165 automated tests and staged runtime verification. Version 1.4.67 includes this documentation update and requires a new build before its binaries can be considered verified.
 
 The 1.1.0 update adds interactive session selection and Codex CLI import to the 1.0.0 Rust-native milestone, which consolidates the prior 0.3.3 development snapshots into a Rust-native agent and Rust terminal interface, with Python retained for Playwright browser communication. It includes the latest terminal redraw improvements to address stale text in Windows Terminal and VS Code terminals.
 

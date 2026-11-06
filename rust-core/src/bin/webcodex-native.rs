@@ -11,7 +11,7 @@ use std::{collections::{BTreeMap},env,fs,io::{self,BufRead,BufReader,Write,IsTer
 
 const PROTOCOL:&str=include_str!("../../assets/protocol.txt");
 const REMINDER:&str=include_str!("../../assets/reminder.txt");
-const HELP:&str="/new start a new chat; /sessions browse saved conversations; /session <id> switch conversation; /chat show chat URL; /skills list Codex skills; /skills search <query> find skills; /skills install <path> install a local skill; /queue show pending messages; /queue edit N <text> edit a pending message; /queue move A B reorder; /queue remove N remove; /queue clear clear pending; /queue recover restore an interrupted task (may resend); /queue discard discard interrupted recovery; /undo undo last edit set; /yes toggle auto-apply; /run toggle shell commands; /permissions change permissions; /settings settings; /turns [1-1000] task turn limit; /files show files; /status show status; /help; /quit";
+const HELP:&str="/new start a new chat; /sessions browse saved conversations; /session <id> switch conversation; /chat show chat URL; /skills list Codex skills; /skills search <query> find skills; /skills install <path> install a local skill; /queue show pending messages; /queue edit N <text> edit a pending message; /queue move A B reorder; /queue remove N remove; /queue clear clear pending; /queue recover restore an interrupted task (may resend); /queue discard discard interrupted recovery; /undo undo last edit set; /recover-files restore files after interrupted undo (confirmation required); /yes toggle auto-apply; /run toggle shell commands; /permissions change permissions; /settings settings; /turns [1-1000] task turn limit; /files show files; /status show status; /help; /quit";
 
 fn err<T:ToString>(value:T)->String{value.to_string()}
 fn strings(v:&Value)->Vec<String>{v.as_array().map(|a|a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default()}
@@ -735,6 +735,11 @@ impl Agent {
             }
             let signal=agent_signal(reply);
             let (feedback,pins)=self.handle_reply(reply)?;
+            if feedback.iter().any(|item|item.starts_with("EDIT REJECTED:")) {
+                for item in &feedback {self.ui.event("error",item);}
+                self.ui.event("error","Edit parsing failed. Automatic retry stopped; submit a corrected task.");
+                break;
+            }
             if signal==Some("done"){
                 if feedback_has_failure(&feedback) || self.ui.cancelled.load(Ordering::SeqCst){
                     self.ui.event("error","DONE received, but an operation failed or the task was cancelled. Completion is not confirmed.");
@@ -906,6 +911,7 @@ impl Agent {
                         "  /queue recover  Restore an interrupted message for manual retry",
                         "  /queue discard  Discard an interrupted recovery record",
                         "  /undo           Restore the last edit set",
+                        "  /recover-files  Recover project files after interrupted undo",
                         "  /status         View session information",
                         "",
                         "CONFIGURATION",
@@ -1099,6 +1105,33 @@ impl Agent {
                 self.state=fresh_state();
                 self.ui.event("session_reset","");
                 self.ui.event("system","New chat started.");
+            },
+            "/recover-files"=>{
+                if !self.ui.confirm(
+                    "Recover files from an interrupted undo? Existing project files may be overwritten or removed.",
+                    false
+                )? {
+                    self.ui.event("system","File recovery cancelled. Recovery data remains unchanged.");
+                } else {
+                    let result=self.worker("backup_recover",json!({
+                        "root":self.root.to_string_lossy()
+                    }))?;
+                    let recovered=strings(&result["recovered"]);
+                    for rel in &recovered {
+                        if let Some(hashes)=self.state["sent_hash"].as_object_mut(){
+                            hashes.remove(rel);
+                        }
+                    }
+                    self.note(format!(
+                        "Explicit file recovery restored the pre-undo state of {} project paths.",
+                        recovered.len()
+                    ));
+                    self.persist()?;
+                    self.ui.event("system",&format!(
+                        "File recovery completed. {} project paths processed.",
+                        recovered.len()
+                    ));
+                }
             },
             "/undo"=>{
                 let result=self.worker("backup_undo",json!({"root":self.root.to_string_lossy()}))?;

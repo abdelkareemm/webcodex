@@ -22,11 +22,11 @@ pub fn parse(reply:&str)->Value {
         let path=clean(path);
         let valid_open=i>0 && {
             let fence=lines[i-1].trim();
-            fence=="````" || fence=="````text"
+            fence.starts_with("````") && !fence.starts_with("`````")
         };
         if !valid_open || path.is_empty() || i+1>=lines.len()
             || !marker(lines[i+1],'<',"SEARCH"){
-            errors.push(format!("Invalid or unfenced edit block: {path}"));
+            errors.push(format!("Invalid edit block for {path} at line {}: preceding={:?}, following={:?}",i+1,lines.get(i.wrapping_sub(1)).copied().unwrap_or(""),lines.get(i+1).copied().unwrap_or("")));
             i+=1;continue;
         }
         let mut separator=i+2;
@@ -76,6 +76,15 @@ pub fn parse(reply:&str)->Value {
     #[test]fn edit_and_actions(){let src="````\nFILE: a.txt\n<<<<<<< SEARCH\na\n=======\nb\n>>>>>>> REPLACE\n````\nNEED: x.py, y.rs\nRUN: echo hi\nDELETE: old.txt\n";
         let parsed=parse(src);assert_eq!(parsed["edits"][0]["path"],"a.txt");assert_eq!(parsed["edits"][0]["search"],"a");assert_eq!(parsed["edits"][0]["replace"],"b");assert_eq!(parsed["needs"].as_array().unwrap().len(),2);assert_eq!(parsed["runs"][0],"echo hi");
         assert!(parsed["errors"].as_array().unwrap().is_empty());
+    }
+    #[test]fn accepts_labeled_fence(){
+        let opening=format!("{} id=test123", "`".repeat(4));
+        let search=format!("{} SEARCH", "<".repeat(7));
+        let ending=format!("{} REPLACE", ">".repeat(7));
+        let source=format!("{opening}\nFILE: example.rs\n{search}\nold\n=======\nnew\n{ending}\n{}\n", "`".repeat(4));
+        let result=parse(&source);
+        assert!(result["errors"].as_array().unwrap().is_empty());
+        assert_eq!(result["edits"][0]["path"],"example.rs");
     }
     #[test]fn rejects_unfenced_edit(){
         let src="FILE: a.txt\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\n";

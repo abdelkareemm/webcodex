@@ -90,6 +90,21 @@ fn apply(text:Option<String>, blocks:&[EditBlock])->PatchResult {
     }
     PatchResult{text:current,errors,applied}
 }
+fn capture_stream<R: io::Read>(mut reader:R)->io::Result<(Vec<u8>,bool)> {
+    const LIMIT:usize=1024*1024;
+    let mut output=Vec::new();
+    let mut chunk=[0u8;8192];
+    let mut truncated=false;
+    loop {
+        let count=reader.read(&mut chunk)?;
+        if count==0 {break;}
+        let remaining=LIMIT.saturating_sub(output.len());
+        let retained=remaining.min(count);
+        output.extend_from_slice(&chunk[..retained]);
+        if retained<count {truncated=true;}
+    }
+    Ok((output,truncated))
+}
 fn run_command(root:&str, cmd:&str, timeout:f64)->Value {
     if !timeout.is_finite() || timeout<=0.0 || timeout>86400.0 { return json!({"error":"invalid timeout"}); }
     let mut command=if cfg!(windows) {let mut c=Command::new("cmd");c.args(["/D","/S","/C",cmd]);c}
@@ -100,23 +115,26 @@ fn run_command(root:&str, cmd:&str, timeout:f64)->Value {
     // Drain both pipes concurrently so large command output can't deadlock the process.
     let out=child.stdout.take().unwrap();
     let err=child.stderr.take().unwrap();
-    let out_thread=thread::spawn(move||{let mut b=Vec::new();let mut r=out;io::Read::read_to_end(&mut r,&mut b).map(|_|b)});
-    let err_thread=thread::spawn(move||{let mut b=Vec::new();let mut r=err;io::Read::read_to_end(&mut r,&mut b).map(|_|b)});
+    let out_thread=thread::spawn(move||capture_stream(out));
+    let err_thread=thread::spawn(move||capture_stream(err));
     let mut timed_out=false;
     let code=loop {
         match child.try_wait() {
             Ok(Some(status))=>break status.code().unwrap_or(-1),
             Ok(None) if start.elapsed().as_secs_f64()>=timeout => {
-                timed_out=true;let _=child.kill();let _=child.wait();break -1;
+                timed_out=true; if cfg!(windows) { let _=Command::new("taskkill").args(["/PID",&child.id().to_string(),"/T","/F"]).stdout(Stdio::null()).stderr(Stdio::null()).status(); } let _=child.kill();let _=child.wait();break -1;
             },
             Ok(None)=>thread::sleep(Duration::from_millis(30)),
             Err(_)=>{let _=child.kill();let _=child.wait();break -1;}
         }
     };
-    let o=out_thread.join().ok().and_then(Result::ok).unwrap_or_default();
-    let e=err_thread.join().ok().and_then(Result::ok).unwrap_or_default();
+    let (o,stdout_truncated)=out_thread.join().ok().and_then(Result::ok).unwrap_or_default();
+    let (e,stderr_truncated)=err_thread.join().ok().and_then(Result::ok).unwrap_or_default();
     if timed_out { return json!({"code":-1,"output":format!("(timed out after {timeout}s)")}); }
-    let mut combined=String::from_utf8_lossy(&o).to_string();combined.push_str(&String::from_utf8_lossy(&e));
+    let mut combined=String::from_utf8_lossy(&o).to_string();
+    if stdout_truncated {combined.push_str("\n[stdout truncated at 1 MiB]\n");}
+    combined.push_str(&String::from_utf8_lossy(&e));
+    if stderr_truncated {combined.push_str("\n[stderr truncated at 1 MiB]\n");}
     json!({"code":code,"output":combined})
 }
 fn respond(req:Request, store_cache:&mut std::collections::HashMap<String, store::Store>)->Value {
@@ -166,6 +184,88 @@ mod tests {
     #[test] fn create_file(){let r=apply(None,&[block("","hello")]);assert_eq!(r.text.as_deref(),Some("hello\n"));}
     #[test] fn reject_ambiguous(){let r=apply(Some("x\nx".into()),&[block("x","y")]);assert_eq!(r.applied,0);assert_eq!(r.errors.len(),1);}
     #[test] fn reject_missing(){let r=apply(None,&[block("x","y")]);assert_eq!(r.applied,0);}
+
+    #[test]
+    fn command_large_stdout_and_stderr_are_truncated(){
+        let root=std::env::temp_dir().join(format!("webcodex-output-test-{}",std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let script=root.join("large_output.py");
+        std::fs::write(&script,"import sys\nsys.stdout.write('A'*1100000)\nsys.stdout.flush()\nsys.stderr.write('B'*1100000)\nsys.stderr.flush()\n").unwrap();
+        let result=run_command(root.to_str().unwrap(),"python large_output.py",30.0);
+        let _=std::fs::remove_dir_all(&root);
+        assert_eq!(result["code"],0,"Command failed: {result}");
+        let output=result["output"].as_str().unwrap();
+        assert!(output.contains("[stdout truncated at 1 MiB]"));
+        assert!(output.contains("[stderr truncated at 1 MiB]"));
+        assert!(output.len()<=2*1024*1024+128);
+    }
+
+    #[test]
+    fn oversized_stream_is_drained_and_bounded(){
+        let bytes=vec![b'x';3*1024*1024];
+        let mut cursor=std::io::Cursor::new(bytes);
+        let (captured,truncated)=capture_stream(&mut cursor).unwrap();
+        assert!(truncated);
+        assert_eq!(captured.len(),1024*1024);
+        assert_eq!(cursor.position(),3*1024*1024);
+    }
+
+    #[test]
+    fn small_stream_is_preserved(){
+        let (captured,truncated)=capture_stream(&b"hello world"[..]).unwrap();
+        assert!(!truncated);
+        assert_eq!(captured,b"hello world");
+    }
+
+    #[test]
+    fn worker_dispatches_backup_recovery(){
+        let root=std::env::temp_dir().join(format!(
+            "webcodex-worker-recovery-{}",std::process::id()
+        ));
+        let _=std::fs::remove_dir_all(&root);
+        let stage=root.join(".webcodex/backups/0001/.undo-recovery");
+        std::fs::create_dir_all(&stage).unwrap();
+
+        std::fs::write(root.join("example.txt"),"interrupted undo content").unwrap();
+        std::fs::write(stage.join("old-0"),"original content").unwrap();
+
+        let journal=json!({
+            "version":1,
+            "entries":[{
+                "rel":"example.txt",
+                "had_original":true,
+                "has_replacement":true
+            }]
+        });
+        std::fs::write(stage.join("journal.json"),journal.to_string()).unwrap();
+
+        let request:Request=serde_json::from_value(json!({
+            "op":"backup_recover",
+            "root":root.to_string_lossy()
+        })).unwrap();
+        let mut stores=std::collections::HashMap::new();
+        let response=respond(request,&mut stores);
+
+        assert!(response.get("error").is_none(),"Recovery failed: {response}");
+        assert_eq!(response["recovered"][0],"example.txt");
+        assert_eq!(
+            std::fs::read_to_string(root.join("example.txt")).unwrap(),
+            "original content"
+        );
+        assert!(!stage.exists());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn command_timeout_returns_promptly(){
+        let command=if cfg!(windows) {"ping -n 8 127.0.0.1 >nul"} else {"sleep 8"};
+        let start=Instant::now();
+        let result=run_command(".",command,0.25);
+        assert_eq!(result["code"],-1);
+        assert!(result["output"].as_str().unwrap_or("").contains("timed out"));
+        assert!(start.elapsed()<Duration::from_secs(6));
+    }
     #[test] fn failed_batch_preserves_original(){
         let original="first\nsecond\n".to_string();
         let result=apply(Some(original.clone()),&[

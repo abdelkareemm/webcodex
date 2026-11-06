@@ -22,6 +22,54 @@ class BrowserRecoveryTests(unittest.TestCase):
         self.assertEqual(attempted, [])
         self.assertEqual(transport._pending_reply, (2, 3))
 
+    def test_unconfirmed_send_does_not_retry_with_keyboard(self):
+        from unittest.mock import patch
+        from itertools import count
+
+        transport = BrowserTransport(Config())
+        transport.page = type("FakePage", (), {"url": "https://chatgpt.com/"})()
+        transport._check_cancel = lambda: None
+        transport._streaming = lambda: False
+        transport._stream_count = lambda: 0
+        transport._count = lambda: 0
+        transport._count_key = lambda key: 0
+        transport._dump_debug = lambda: None
+
+        clicks = []
+        keyboard = []
+        transport._try_click_send = lambda: clicks.append("click")
+        transport._press = lambda key: keyboard.append(key)
+
+        clock = count(0, 7)
+        with patch("webcodex.transports.time.time", side_effect=lambda: next(clock)), \
+             patch("webcodex.transports.ui.warn"):
+            confirmed = transport._submit(0, 0, 0)
+
+        self.assertFalse(confirmed)
+        self.assertEqual(clicks, ["click"])
+        self.assertEqual(keyboard, [])
+
+    def test_failed_click_is_not_retried(self):
+        transport = BrowserTransport(Config())
+        transport._check_cancel = lambda: None
+
+        class UncertainButton:
+            attempts = 0
+
+            def is_enabled(self):
+                return True
+
+            def click(self, **kwargs):
+                self.attempts += 1
+                raise RuntimeError("Click outcome uncertain")
+
+        button = UncertainButton()
+        transport._first_visible = lambda key: button
+
+        transport._try_click_send(wait=0.1)
+
+        self.assertEqual(button.attempts, 1)
+
     def test_recovery_requires_pending_response(self):
         transport = BrowserTransport(Config())
 

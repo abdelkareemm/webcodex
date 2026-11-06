@@ -30,6 +30,7 @@ pub const COMMANDS: &[Command] = &[
     Command { name: "/queue recover", description: "Restore an interrupted queued task" },
     Command { name: "/queue discard", description: "Discard interrupted task recovery data" },
     Command { name: "/undo", description: "Undo the last file edits" },
+    Command { name: "/recover-files", description: "Recover project files after an interrupted undo" },
     Command { name: "/yes", description: "Toggle automatic approvals" },
     Command { name: "/run", description: "Toggle shell execution" },
     Command { name: "/clear", description: "Clear the transcript" },
@@ -78,6 +79,18 @@ mod tests {
     fn sessions_command_is_searchable() {
         assert_eq!(search("/sessions")[0].name, "/sessions");
         assert!(search("saved workspace").iter().any(|c| c.name == "/sessions"));
+    }
+
+    #[test]
+    fn file_recovery_command_is_searchable_and_distinct() {
+        assert_eq!(search("/recover-files")[0].name, "/recover-files");
+        assert_eq!(search("/recover-f")[0].name, "/recover-files");
+
+        let matches=search("interrupted undo");
+        assert!(matches.iter().any(|c| c.name=="/recover-files"));
+
+        assert_eq!(search("/queue recover")[0].name, "/queue recover");
+        assert_ne!(search("/recover-files")[0].name, "/queue recover");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 [package]
 name = "webcodex-tui"
-version = "1.4.0"
+version = "1.4.67"
 edition = "2021"
 authors = ["abdelkareemm"]
 description = "Rust terminal frontend for WebCodex"

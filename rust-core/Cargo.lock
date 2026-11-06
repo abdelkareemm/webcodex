@@ -770,7 +770,7 @@ dependencies = [
 
 [[package]]
 name = "webcodex-core"
-version = "1.4.0"
+version = "1.4.67"
 dependencies = [
  "chrono",
  "crossterm",
