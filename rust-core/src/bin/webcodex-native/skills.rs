@@ -78,13 +78,22 @@ pub fn instructions(root:&Path,task:&str)->Result<String,String>{
     let skills=discover(root);
     let mut selected=names;
     if selected.is_empty(){
-        let task_words:std::collections::HashSet<String>=task.split(|c:char|!c.is_ascii_alphanumeric()).filter(|s|s.len()>=4).map(str::to_ascii_lowercase).collect();
+        let task_words:std::collections::HashSet<String>=task.split(|c:char|!c.is_ascii_alphanumeric())
+            .filter(|s|s.len()>=4).map(str::to_ascii_lowercase).collect();
         let mut ranked=Vec::new();
         for skill in &skills {
-            let description=format!("{} {}",skill.name.replace('-'," "),skill.description);
-            let words:std::collections::HashSet<String>=description.split(|c:char|!c.is_ascii_alphanumeric()).filter(|s|s.len()>=4).map(str::to_ascii_lowercase).collect();
-            let score=words.intersection(&task_words).count();
-            if score>=2 {ranked.push((score,skill.name.to_ascii_lowercase()));}
+            let name_words:std::collections::HashSet<String>=skill.name
+                .split(|c:char|!c.is_ascii_alphanumeric())
+                .filter(|s|s.len()>=4).map(str::to_ascii_lowercase).collect();
+            let description_words:std::collections::HashSet<String>=skill.description
+                .split(|c:char|!c.is_ascii_alphanumeric())
+                .filter(|s|s.len()>=4).map(str::to_ascii_lowercase).collect();
+            let name_matches=name_words.intersection(&task_words).count();
+            let description_matches=description_words.intersection(&task_words).count();
+            let score=name_matches*3+description_matches;
+            if name_matches>0 || description_matches>=2 {
+                ranked.push((score,skill.name.to_ascii_lowercase()));
+            }
         }
         ranked.sort_by(|a,b|b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
         selected=ranked.into_iter().take(2).map(|(_,name)|name).collect();

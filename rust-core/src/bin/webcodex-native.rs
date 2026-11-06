@@ -80,6 +80,10 @@ impl JsonChild {
 }
 impl Drop for JsonChild {fn drop(&mut self){let _=self.child.kill();let _=self.child.wait();}}
 
+fn should_queue_task(active:bool,pending:bool,input:&str)->bool {
+    active || pending || input=="/queue" || input.starts_with("/queue ")
+}
+
 struct Ui {
     socket:Option<Arc<Mutex<TcpStream>>>,reader:Option<mpsc::Receiver<Value>>,process:Option<Child>,approval_all:bool,
     cancelled:Arc<AtomicBool>,
@@ -144,7 +148,11 @@ impl Ui {
                                                     }
                                                 }
                                             }
-                                        }else if message["kind"]=="task" && (thread_active.load(Ordering::SeqCst) || thread_queue.lock().map(|q|q.len()>0 || q.has_inflight()).unwrap_or(false) || message["body"].as_str().unwrap_or("").starts_with("/queue") || !message["body"].as_str().unwrap_or("").trim_start().starts_with('/')) {
+                                        }else if message["kind"]=="task" && should_queue_task(
+                                            thread_active.load(Ordering::SeqCst),
+                                            thread_queue.lock().map(|q|q.len()>0 || q.has_inflight() || q.has_load_error()).unwrap_or(true),
+                                            message["body"].as_str().unwrap_or("").trim(),
+                                        ) {
                                             let input=message["body"].as_str().unwrap_or("").trim();
                                             let outcome=if thread_active.load(Ordering::SeqCst) && (input=="/queue recover" || input=="/queue discard"){
                                                 Err("Cannot recover or discard while a task is running.".into())
@@ -1402,7 +1410,10 @@ fn run()->Result<(),String>{
         let result=if input.starts_with('/') {agent.command(input.trim()).map(|continue_|(continue_,()))}
             else{agent.task(input.trim()).map(|_|(true,()))};
         if agent.ui.queued_current {
-            if result.is_ok() && agent.task_confirmed {
+            if result.is_ok() {
+                // The agent returned normally, even if it paused without DONE.
+                // Crash recovery is for interrupted execution, not every
+                // unfinished conversational task.
                 let acknowledgment={
                     let mut queue=agent.ui.queue.lock().map_err(err)?;
                     queue.acknowledge()
@@ -1411,7 +1422,7 @@ fn run()->Result<(),String>{
                     agent.ui.event("error",&format!("Queue acknowledgment failed: {error}"));
                 }
             }else{
-                agent.ui.event("error","Queued task not confirmed complete. Its recovery record was preserved. Review the task before using /queue recover or /queue discard.");
+                agent.ui.event("error","Queued task execution was interrupted. Its recovery record was preserved. Review the task before using /queue recover or /queue discard.");
             }
             agent.ui.queued_current=false;
         }
@@ -1425,6 +1436,14 @@ fn main(){if let Err(e)=run(){eprintln!("WebCodex Rust agent error: {e}");std::p
 
 #[cfg(test)]mod tests {
     use super::*;
+    #[test]fn idle_tasks_are_sent_directly(){
+        assert!(!should_queue_task(false,false,"Fix the UI"));
+        assert!(!should_queue_task(false,false,"/status"));
+        assert!(should_queue_task(true,false,"Fix the UI"));
+        assert!(should_queue_task(false,true,"Fix the UI"));
+        assert!(should_queue_task(false,false,"/queue"));
+        assert!(should_queue_task(false,false,"/queue recover"));
+    }
     #[test]fn markdown_blocks_are_hidden(){
         let s="hello\n````\nFILE: a\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\n````\nRUN: echo hello";
         assert_eq!(clean_reply(s),"hello");
