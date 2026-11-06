@@ -115,6 +115,10 @@ impl App {
             _=>None,
         }
     }
+    fn enter_can_complete_palette(&self)->bool {
+        self.draft.starts_with('/') && self.draft.split_whitespace().count()==1
+    }
+
     fn complete_palette(&mut self)->bool {
         if !self.draft.starts_with('/') {return false;}
         let matches=command_palette::search(&self.draft);
@@ -137,8 +141,11 @@ impl App {
         }
     }
     fn submit(&mut self,task:String) {
-        self.history_index=None;self.history_stash.clear();
-        self.push("user".into(),task);self.draft.clear();self.cursor=0;self.busy=true;self.jump_bottom();
+        self.history_index=None;
+        self.history_stash.clear();
+        self.push("user".into(),task);
+        self.set_draft(String::new());
+        self.jump_bottom();
     }
     fn put(&mut self, c:char) {
         self.draft.insert(self.cursor,c);
@@ -608,7 +615,7 @@ fn render(f: &mut ratatui::Frame,app: &mut App) {
         footer
     };
     f.render_widget(Paragraph::new(Span::styled(footer,theme_muted())),rows[4]);
-    if app.draft.starts_with('/') && !app.busy && app.approval.is_none()
+    if app.draft.starts_with('/') && app.approval.is_none()
         && app.settings.is_none() && app.page.is_none()
         && area.width >= 45 && area.height >= 18
     {
@@ -949,11 +956,10 @@ fn loop_ui(terminal:&mut Terminal<CrosstermBackend<io::Stdout>>, sock:&mut TcpSt
                             KeyCode::PageDown=>page.select_relative(10),
                             KeyCode::Home=>page.selected=0,
                             KeyCode::End=>page.selected=page.choices.len()-1,
-                            KeyCode::Enter if !app.busy=>{
+                            KeyCode::Enter=>{
                                 if let Some(id)=page.selected_session_id(){
                                     send(sock,"task",&format!("/session {id}"))?;
                                     app.page=None;
-                                    app.busy=true;
                                 }
                             },
                             _=>{},
@@ -971,13 +977,12 @@ fn loop_ui(terminal:&mut Terminal<CrosstermBackend<io::Stdout>>, sock:&mut TcpSt
                         KeyCode::Esc=>app.settings=None,
                         KeyCode::Up=>app.settings_index=(app.settings_index+6)%7,
                         KeyCode::Down=>app.settings_index=(app.settings_index+1)%7,
-                        KeyCode::Enter if !app.busy=>{
+                        KeyCode::Enter=>{
                             if let Some(command)=app.selected_setting_command(){
                                 send(sock,"task",command)?;
                                 app.settings=None;
                                 app.set_draft(String::new());
                                 app.history_index=None;
-                                app.busy=true;
                             }
                         },
                         _=>{},
@@ -1014,10 +1019,26 @@ fn loop_ui(terminal:&mut Terminal<CrosstermBackend<io::Stdout>>, sock:&mut TcpSt
                     KeyCode::Up if !modifiers.contains(KeyModifiers::ALT) && !app.draft.contains('\n')=>app.recall_prev(),
                     KeyCode::Down if !modifiers.contains(KeyModifiers::ALT) && !app.draft.contains('\n')=>app.recall_next(),
                     KeyCode::Enter if modifiers.contains(KeyModifiers::ALT)=>app.put('\n'),
-                    KeyCode::Enter if app.draft.starts_with('/') && app.complete_palette()=>{},
-                    KeyCode::Enter=>if app.ready && !app.busy && !app.draft.trim().is_empty(){
-                        let task=app.draft.trim().to_string();send(sock,"task",&task)?;
-                        app.submit(task);
+                    KeyCode::Enter if app.enter_can_complete_palette() && app.complete_palette()=>{},
+                    KeyCode::Enter=>if app.ready && !app.draft.trim().is_empty(){
+                        let task=app.draft.trim().to_string();
+                        send(sock,"task",&task)?;
+                        if app.busy && !(task=="/queue" || task.starts_with("/queue ")) {
+                            app.history_index=None;
+                            app.history_stash.clear();
+                            app.push("system".into(),"Submitting to pending queue...".into());
+                            app.set_draft(String::new());
+                        } else if task=="/queue" || task.starts_with("/queue ") {
+                            app.history_index=None;
+                            app.history_stash.clear();
+                            app.push("user".into(),task);
+                            app.set_draft(String::new());
+                        } else {
+                            app.history_index=None;
+                            app.history_stash.clear();
+                            app.set_draft(String::new());
+                            app.push("system".into(),"Message submitted to agent.".into());
+                        }
                     },
                     KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL)=>{app.put(c);},
                     KeyCode::Backspace=>app.backspace(), KeyCode::Delete=>app.delete_forward(),
@@ -1036,6 +1057,42 @@ fn main(){let mut args=env::args().skip(1);let port=args.next().and_then(|s|s.pa
 #[cfg(test)]
 mod regression_tests {
     use super::*;
+
+    #[test]
+    fn command_arguments_are_preserved_on_enter(){
+        let mut app=App::new("project".into());
+        for command in [
+            "/queue edit 2 revised message",
+            "/queue move 3 1",
+            "/skills search graphify",
+        ] {
+            app.set_draft(command.into());
+            assert!(!app.enter_can_complete_palette());
+            assert_eq!(app.draft,command);
+        }
+    }
+
+    #[test]
+    fn busy_state_is_controlled_by_native_agent_events(){
+        let mut app=App::new("project".into());
+        app.ready=true;
+        app.submit("Example message".into());
+        assert!(!app.busy);
+
+        on_message(&mut app,Incoming{
+            kind:"busy".into(),
+            title:String::new(),
+            body:"true".into(),
+        });
+        assert!(app.busy);
+
+        on_message(&mut app,Incoming{
+            kind:"busy".into(),
+            title:String::new(),
+            body:"false".into(),
+        });
+        assert!(!app.busy);
+    }
 
     #[test]
     fn socket_protocol_transmits_complete_json_messages(){

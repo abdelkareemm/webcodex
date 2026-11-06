@@ -140,7 +140,7 @@ fn respond(req:Request, store_cache:&mut std::collections::HashMap<String, store
     if req.op=="plan_message" {return match planner::handle(&data) {Ok(v)=>v,Err(e)=>json!({"error":e})};}
 
     match req.op.as_str() {
-        "ping"=>json!({"version":"1.2.1","worker":"webcodex-core"}),
+        "ping"=>json!({"version":env!("CARGO_PKG_VERSION"),"worker":"webcodex-core"}),
         "patch"=>serde_json::to_value(apply(req.text,&req.blocks)).unwrap_or(Value::Null),
         "run"=>run_command(&req.root,&req.command,req.timeout),
         _=>json!({"error":format!("unknown operation: {}",req.op)}),

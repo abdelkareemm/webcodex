@@ -4,11 +4,14 @@
 use serde_json::{json,Value};
 #[path="webcodex-native/codex_import.rs"] mod codex_import;
 #[path="webcodex-native/picker.rs"] mod picker;
+#[path="webcodex-native/skills.rs"] mod skills;
+#[path="webcodex-native/inbox.rs"] mod inbox;
+#[path="webcodex-native/versioning.rs"] mod versioning;
 use std::{collections::{BTreeMap},env,fs,io::{self,BufRead,BufReader,Write,IsTerminal},net::{TcpListener,TcpStream},path::{Component,Path,PathBuf},process::{Child,ChildStdin,ChildStdout,Command,Stdio},sync::{mpsc,Arc,Mutex,atomic::{AtomicBool,Ordering}},time::Duration};
 
 const PROTOCOL:&str=include_str!("../../assets/protocol.txt");
 const REMINDER:&str=include_str!("../../assets/reminder.txt");
-const HELP:&str="/new  start a new chat; /sessions browse and switch saved conversations; /session <id> switch directly to a saved conversation; /chat show chat URL; /undo undo last edit set; /yes toggle auto-apply; /run toggle shell commands; /permissions change execution permissions; /settings interactive settings; /turns [1-1000] task turn limit; /files show visible files; /status show settings; /help; /quit";
+const HELP:&str="/new start a new chat; /sessions browse saved conversations; /session <id> switch conversation; /chat show chat URL; /skills list Codex skills; /skills search <query> find skills; /skills install <path> install a local skill; /queue show pending messages; /queue edit N <text> edit a pending message; /queue move A B reorder; /queue remove N remove; /queue clear clear pending; /queue recover restore an interrupted task (may resend); /queue discard discard interrupted recovery; /undo undo last edit set; /yes toggle auto-apply; /run toggle shell commands; /permissions change permissions; /settings settings; /turns [1-1000] task turn limit; /files show files; /status show status; /help; /quit";
 
 fn err<T:ToString>(value:T)->String{value.to_string()}
 fn strings(v:&Value)->Vec<String>{v.as_array().map(|a|a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default()}
@@ -78,12 +81,17 @@ impl JsonChild {
 impl Drop for JsonChild {fn drop(&mut self){let _=self.child.kill();let _=self.child.wait();}}
 
 struct Ui {
-    socket:Option<TcpStream>,reader:Option<mpsc::Receiver<Value>>,process:Option<Child>,approval_all:bool,
+    socket:Option<Arc<Mutex<TcpStream>>>,reader:Option<mpsc::Receiver<Value>>,process:Option<Child>,approval_all:bool,
     cancelled:Arc<AtomicBool>,
+    active:Arc<AtomicBool>,
+    queue:Arc<Mutex<inbox::Inbox>>,
+    queued_current:bool,
     browser_input:Arc<Mutex<Option<Arc<Mutex<ChildStdin>>>>>,
 }
 impl Ui {
     fn new(root:&Path,plain:bool)->Self {
+        let queue=Arc::new(Mutex::new(inbox::Inbox::open(root)));
+        let active=Arc::new(AtomicBool::new(false));
         if !plain && io::stdin().is_terminal() && io::stdout().is_terminal() && tui_executable().is_file(){
             if let Ok(listener)=TcpListener::bind("127.0.0.1:0"){
                 let port=listener.local_addr().map(|a|a.port()).unwrap_or(0);
@@ -106,6 +114,11 @@ impl Ui {
                                 let browser_input:Arc<Mutex<Option<Arc<Mutex<ChildStdin>>>>>=Arc::new(Mutex::new(None));
                                 let thread_cancelled=Arc::clone(&cancelled);
                                 let thread_input=Arc::clone(&browser_input);
+                                let thread_active=Arc::clone(&active);
+                                let thread_queue=Arc::clone(&queue);
+                                let skill_root=root.to_path_buf();
+                                let live_socket=Arc::new(Mutex::new(socket));
+                                let thread_socket=Arc::clone(&live_socket);
                                 let (tx,rx)=mpsc::channel();
                                 std::thread::spawn(move || {
                                     let mut reader=BufReader::new(copy);
@@ -131,11 +144,60 @@ impl Ui {
                                                     }
                                                 }
                                             }
+                                        }else if message["kind"]=="task" && (thread_active.load(Ordering::SeqCst) || thread_queue.lock().map(|q|q.len()>0 || q.has_inflight()).unwrap_or(false) || message["body"].as_str().unwrap_or("").starts_with("/queue") || !message["body"].as_str().unwrap_or("").trim_start().starts_with('/')) {
+                                            let input=message["body"].as_str().unwrap_or("").trim();
+                                            let outcome=if thread_active.load(Ordering::SeqCst) && (input=="/queue recover" || input=="/queue discard"){
+                                                Err("Cannot recover or discard while a task is running.".into())
+                                            }else if input.starts_with("/queue"){
+                                                match thread_queue.lock(){
+                                                    Ok(mut queue)=>queue.manage(input),
+                                                    Err(e)=>Err(e.to_string())
+                                                }
+                                            }else if input=="/help"{
+                                                Ok(HELP.to_string())
+                                            }else if input=="/skills"{
+                                                Ok(skills::catalogue(&skill_root).join("\n"))
+                                            }else if let Some(query)=input.strip_prefix("/skills search "){
+                                                let query=query.to_ascii_lowercase();
+                                                let matches=skills::discover(&skill_root).into_iter()
+                                                    .filter(|skill|skill.name.to_ascii_lowercase().contains(&query)
+                                                        ||skill.description.to_ascii_lowercase().contains(&query))
+                                                    .map(|skill|format!("${} - {}",skill.name,skill.description))
+                                                    .collect::<Vec<_>>();
+                                                Ok(if matches.is_empty() {
+                                                    "No matching skills.".into()
+                                                }else{
+                                                    matches.join("\n")
+                                                })
+                                            }else if input=="/status"{
+                                                Ok("Agent is working. Use /queue to inspect pending messages.".into())
+                                            }else if input.starts_with('/'){
+                                                Err("This command requires the agent to be idle.".into())
+                                            }else{
+                                                match thread_queue.lock(){
+                                                    Ok(mut queue)=>queue.push(input.to_string())
+                                                        .map(|n|format!("Queued message #{n}")),
+                                                    Err(e)=>Err(e.to_string())
+                                                }
+                                            };
+                                            let (kind,body)=match outcome{
+                                                Ok(text)=>("system",text),
+                                                Err(error)=>("error",error)
+                                            };
+                                            if let Ok(mut socket)=thread_socket.lock(){
+                                                let packet=json!({"kind":kind,"body":body}).to_string();
+                                                let _=socket.write_all(packet.as_bytes());
+                                                let _=socket.write_all(b"\n");
+                                                let _=socket.flush();
+                                            }
+                                            if !thread_active.load(Ordering::SeqCst){
+                                                let _=tx.send(json!({"kind":"wake","body":""}));
+                                            }
                                         }else if tx.send(message).is_err(){break;}
                                     }
                                 });
-                                return Self{socket:Some(socket),reader:Some(rx),process:Some(process),
-                                    approval_all:false,cancelled,browser_input};
+                                return Self{socket:Some(live_socket),reader:Some(rx),process:Some(process),
+                                    approval_all:false,cancelled,active,queue,queued_current:false,browser_input};
                             }
                         }
                     }
@@ -144,13 +206,18 @@ impl Ui {
             }
         }
         Self{socket:None,reader:None,process:None,approval_all:false,
-            cancelled:Arc::new(AtomicBool::new(false)),
+            cancelled:Arc::new(AtomicBool::new(false)),active,queue,queued_current:false,
             browser_input:Arc::new(Mutex::new(None))}
     }
     fn event(&mut self,kind:&str,body:&str){
-        if let Some(s)=self.socket.as_mut(){
+        if let Some(s)=self.socket.as_ref(){
             let line=json!({"kind":kind,"body":body});
-            if serde_json::to_writer(&mut *s,&line).is_ok(){let _=s.write_all(b"\n");let _=s.flush();}
+            if let Ok(mut socket)=s.lock(){
+                if serde_json::to_writer(&mut *socket,&line).is_ok(){
+                    let _=socket.write_all(b"\n");
+                    let _=socket.flush();
+                }
+            }
         }else if !body.is_empty(){
             match kind {
                 "error"=>eprintln!("{body}"),
@@ -168,6 +235,35 @@ impl Ui {
         }
     }
     fn receive(&mut self)->Result<Option<String>,String>{
+        self.queued_current=false;
+        if let Some(reader)=self.reader.as_ref(){
+            match reader.try_recv(){
+                Ok(v) if v["kind"]=="exit"=>return Ok(None),
+                Ok(v) if v["kind"]=="task"=>{
+                    return Ok(Some(v["body"].as_str().unwrap_or("").to_string()));
+                },
+                Ok(_)=>{},
+                Err(mpsc::TryRecvError::Disconnected)=>{
+                    return Err("TUI disconnected".into());
+                },
+                Err(mpsc::TryRecvError::Empty)=>{},
+            }
+        }
+        let mut queue=self.queue.lock().map_err(err)?;
+        let next=if queue.has_inflight() || queue.has_load_error(){
+            None
+        }else{
+            queue.pop()?
+        };
+        if next.is_some(){
+            self.active.store(true,Ordering::SeqCst);
+        }
+        drop(queue);
+        if let Some(message)=next{
+            self.queued_current=true;
+            self.event("user",&message);
+            return Ok(Some(message));
+        }
         if let Some(reader)=self.reader.as_ref(){
             let v=reader.recv().map_err(|_|"TUI disconnected".to_string())?;
             if v["kind"]=="exit" {return Ok(None)}
@@ -209,10 +305,12 @@ impl Drop for Ui {
     fn drop(&mut self){
         // Ask the TUI to leave alternate-screen/raw mode before exiting.
         // Killing it first leaves an orphaned terminal frame in PowerShell.
-        if let Some(mut socket)=self.socket.take(){
-            let _=socket.set_write_timeout(Some(Duration::from_millis(250)));
-            let _=socket.write_all(b"{\"kind\":\"exit\",\"body\":\"\"}\n");
-            let _=socket.flush();
+        if let Some(socket)=self.socket.take(){
+            if let Ok(mut socket)=socket.lock(){
+                let _=socket.set_write_timeout(Some(Duration::from_millis(250)));
+                let _=socket.write_all(b"{\"kind\":\"exit\",\"body\":\"\"}\n");
+                let _=socket.flush();
+            }
         }
         self.reader.take();
         if let Some(mut process)=self.process.take(){
@@ -320,7 +418,7 @@ fn parse_options()->Result<Options,String>{
             "--headless"=>o.headless=true,"--temporary"=>o.temporary=true,
             "-s"|"--sandbox"=>{let mode=option_value(&mut args,&arg)?;if mode!="danger-full-access"{return Err(format!("unsupported sandbox mode: {mode}"))}o.allow_run=true},
             "-a"|"--ask-for-approval"=>{let mode=option_value(&mut args,&arg)?;if mode!="never"&&mode!="on-request"{return Err(format!("unsupported approval policy: {mode}"))}o.approve_never=mode=="never"},
-            "--version"=>{println!("webcodex 1.2.1 (Rust)");std::process::exit(0)},
+            "--version"=>{println!("webcodex {} (Rust)",env!("CARGO_PKG_VERSION"));std::process::exit(0)},
             "--help"|"-h"=>{println!("WebCodex Rust CLI\n  webcodex resume [-s danger-full-access -a never] (select saved thread)\n  webcodex resume <ChatGPT-UUID> [-s danger-full-access -a never]\n  webcodex resume https://chatgpt.com/c/<UUID>\n  webcodex resume --last (resume latest without picker)\n  webcodex import-codex [--list | --session <id>] [--codex-home <dir>]\n  -C <folder>  --model <model>  --browser <chrome|msedge|chromium>\n  --thread-id <id>  --list-threads  --login  --max-turns <n>  -i\n  --no-tui  --force  --allow-run  --yes\n\n{HELP}");std::process::exit(0)},
             "--manual"|"--dry-run"=>return Err(format!("{arg} is available through the Python compatibility CLI")),
             "--"=>{o.tasks.extend(args);break},
@@ -339,7 +437,8 @@ fn parse_options()->Result<Options,String>{
 
 struct Agent {root:PathBuf,db:PathBuf,worker:JsonChild,browser:Browser,ui:Ui,
     thread:Option<String>,state:Value,yes:bool,allow_run:bool,approve_never:bool,
-    max_turns:usize,max_chars:usize,max_file_chars:usize,max_files:usize}
+    max_turns:usize,max_chars:usize,max_file_chars:usize,max_files:usize,
+    task_confirmed:bool}
 impl Agent {
     fn worker(&mut self,operation:&str,mut args:Value)->Result<Value,String>{
         args["op"]=json!(operation);self.worker.call(args)
@@ -381,7 +480,8 @@ impl Agent {
         }))?;
         for key in ["sent_hash","sent_paths","not_sent"]{self.state[key]=next[key].clone();}
         self.state["started"]=json!(true);self.state["notes"]=json!([]);
-        Ok(next["message"].as_str().ok_or("missing planned prompt")?.to_string())
+        let planned=next["message"].as_str().ok_or("missing planned prompt")?;
+        Ok(format!("{planned}\n\nVERSIONING POLICY: When editing WebCodex itself, include one standalone VERSION: patch, VERSION: minor, or VERSION: major line outside code fences. Use patch for fixes and small changes, minor for substantial backward-compatible features, and major for breaking changes. Omission defaults to patch. Each successfully applied edit batch increments the version once."))
     }
     fn note(&mut self,note:String){if let Some(notes)=self.state["notes"].as_array_mut(){notes.push(json!(note));}}
     fn hash(&mut self,rel:&str)->Result<(),String>{
@@ -460,7 +560,9 @@ impl Agent {
             if Some(new)==current.as_deref(){continue}
             self.ui.event("activity",&format!("Edit {rel}"));
             if !self.yes && !self.ui.confirm(&format!("Apply changes to {rel}?"),true)?{
-                self.note(format!("The user REJECTED your edit to {rel}; the file is unchanged."));continue;
+                self.note(format!("The user REJECTED your edit to {rel}; the file is unchanged."));
+                feedback.push(format!("EDIT DECLINED {rel}: user rejected the change"));
+                continue;
             }
             if self.ui.cancelled.load(Ordering::SeqCst) {
                 return Err("Task cancelled before writing file".into());
@@ -483,7 +585,11 @@ impl Agent {
             let path=match self.validate_path(&rel){Ok(p)=>p,Err(e)=>{feedback.push(format!("DELETE REJECTED {rel}: {e}"));continue}};
             if !path.is_file(){feedback.push(format!("DELETE FAILED {rel}: no such file"));continue}
             self.ui.event("activity",&format!("Delete {rel}"));
-            if !self.yes && !self.ui.confirm(&format!("Delete {rel}?"),true)?{self.note(format!("The user REJECTED deleting {rel}."));continue}
+            if !self.yes && !self.ui.confirm(&format!("Delete {rel}?"),true)?{
+                self.note(format!("The user REJECTED deleting {rel}."));
+                feedback.push(format!("DELETE DECLINED {rel}: user rejected deletion"));
+                continue;
+            }
             if self.ui.cancelled.load(Ordering::SeqCst) {
                 return Err("Task cancelled before deleting file".into());
             }
@@ -495,6 +601,30 @@ impl Agent {
         }
         if !manifest.is_empty(){
             fs::create_dir_all(&backup).map_err(err)?;
+            let version_paths=[
+                "pyproject.toml",
+                "webcodex/__init__.py",
+                "rust-core/Cargo.toml",
+                "rust-core/Cargo.lock",
+                "rust-tui/Cargo.toml",
+                "rust-tui/Cargo.lock",
+            ];
+            let version_edited=manifest.values().flatten()
+                .any(|path|version_paths.contains(&path.as_str()));
+            if !version_edited
+                && self.root.join("rust-core/Cargo.toml").is_file()
+                && self.root.join("rust-tui/Cargo.toml").is_file()
+                && self.root.join("rust-core/src/bin/webcodex-native.rs").is_file()
+            {
+                for path in version_paths {
+                    self.backup(&backup,path,false,&mut manifest)?;
+                }
+                match versioning::bump(&self.root,reply){
+                    Ok(Some(change))=>feedback.push(format!("VERSION BUMPED {change}")),
+                    Ok(None)=>{},
+                    Err(error)=>feedback.push(format!("VERSION FAILED: {error}")),
+                }
+            }
             fs::write(backup.join("manifest.json"),serde_json::to_vec(&manifest).map_err(err)?).map_err(err)?;
         }
         if let Some(needs)=parsed["needs"].as_array(){
@@ -529,12 +659,17 @@ impl Agent {
         Ok((feedback,pins))
     }
     fn task(&mut self,task:&str)->Result<(),String>{
+        self.task_confirmed=false;
         self.ui.cancelled.store(false,Ordering::SeqCst);
         self.log("user",task)?;
         // A read-only imported Codex transcript is presented as a bounded handoff
         // exactly once when the user sends the first task to the new ChatGPT chat.
         if let Some(handoff)=self.state["handoff"].as_str().map(str::to_string) {
             self.note(handoff);
+        }
+        let active_skills=skills::instructions(&self.root,task)?;
+        if !active_skills.is_empty(){
+            self.note(format!("ACTIVE CODEX SKILLS:\n{active_skills}"));
         }
         let mut prompt=self.message(Some(task),&[],&[])?;
         if self.state["handoff"].is_string() {self.state.as_object_mut().map(|v|v.remove("handoff"));}
@@ -593,9 +728,14 @@ impl Agent {
             let signal=agent_signal(reply);
             let (feedback,pins)=self.handle_reply(reply)?;
             if signal==Some("done"){
-                completed=true;
-                self.ui.event("activity","Task completed.");
-                break;
+                if feedback_has_failure(&feedback) || self.ui.cancelled.load(Ordering::SeqCst){
+                    self.ui.event("error","DONE received, but an operation failed or the task was cancelled. Completion is not confirmed.");
+                }else{
+                    completed=true;
+                    self.task_confirmed=true;
+                    self.ui.event("activity","Task completed.");
+                    break;
+                }
             }
             if signal==Some("blocked"){
                 completed=true;
@@ -619,6 +759,11 @@ impl Agent {
         self.persist()?;Ok(())
     }
     fn switch_session(&mut self,id:&str)->Result<(),String>{
+        let queue=self.ui.queue.lock().map_err(err)?;
+        if queue.len()>0 || queue.has_inflight() {
+            return Err("Pending or interrupted messages belong to this conversation. Resolve them before switching sessions.".into());
+        }
+        drop(queue);
         if self.thread.as_deref()==Some(id){
             self.ui.event("system","This conversation is already active.");
             return Ok(());
@@ -687,6 +832,36 @@ impl Agent {
     }
 
     fn command(&mut self,command:&str)->Result<bool,String>{
+        if command=="/queue" || command.starts_with("/queue "){
+            let result=self.ui.queue.lock().map_err(err)?.manage(command)?;
+            self.ui.event("system",&result);
+            return Ok(true);
+        }
+        if let Some(query)=command.strip_prefix("/skills search "){
+            let query=query.trim().to_ascii_lowercase();
+            let lines=skills::discover(&self.root).into_iter()
+                .filter(|s|s.name.to_ascii_lowercase().contains(&query)||s.description.to_ascii_lowercase().contains(&query))
+                .map(|s|format!("${} - {}",s.name,s.description)).collect::<Vec<_>>();
+            self.ui.event("page",&json!({"title":"Skill search","lines":lines}).to_string());
+            return Ok(true);
+        }
+        if let Some(source)=command.strip_prefix("/skills install "){
+            let supplied=PathBuf::from(source.trim().trim_matches('"'));
+            let source=if supplied.is_absolute(){supplied}else{self.root.join(supplied)};
+            if self.ui.confirm(&format!("Install skill from {}?",source.display()),false)?{
+                let result=skills::install_local(&source)?;
+                self.ui.event("system",&result);
+            }
+            return Ok(true);
+        }
+        if command.trim()=="/skills" {
+            let lines=skills::catalogue(&self.root);
+            self.ui.event("page",&json!({
+                "title":"Installed Codex and WebCodex skills",
+                "lines":if lines.is_empty(){vec!["No skills discovered".to_string()]}else{lines}
+            }).to_string());
+            return Ok(true);
+        }
         match command.split_whitespace().next().unwrap_or(""){
             "/quit"|"/exit"|"/q"=>return Ok(false),
             "/help"=>{
@@ -712,6 +887,16 @@ impl Agent {
                         "",
                         "WORKSPACE",
                         "  /files          Browse indexed project files",
+                        "  /skills         Browse installed skills",
+                        "  /skills search  Search installed skills",
+                        "  /skills install <path>  Install a local skill",
+                        "  /queue          Show queued messages",
+                        "  /queue clear    Clear queued messages",
+                        "  /queue remove N Remove pending message N",
+                        "  /queue move A B Reorder pending messages",
+                        "  /queue edit N text  Replace pending message N",
+                        "  /queue recover  Restore an interrupted message for manual retry",
+                        "  /queue discard  Discard an interrupted recovery record",
                         "  /undo           Restore the last edit set",
                         "  /status         View session information",
                         "",
@@ -893,6 +1078,11 @@ impl Agent {
             "/run"=>{self.allow_run=!self.allow_run;self.ui.event("system",&format!("run commands: {}",self.allow_run))},
             "/clear"=>self.ui.event("clear",""),
             "/new"=>{
+                let queue=self.ui.queue.lock().map_err(err)?;
+                if queue.len()>0 || queue.has_inflight() {
+                    return Err("Resolve pending and interrupted messages before starting a new conversation.".into());
+                }
+                drop(queue);
                 if self.thread.is_some(){
                     self.persist()?;
                 }
@@ -919,6 +1109,23 @@ impl Agent {
         Ok(true)
     }
 }
+fn feedback_has_failure(feedback:&[String])->bool{
+    feedback.iter().any(|item|{
+        item.starts_with("EDIT REJECTED")
+            || item.starts_with("EDIT FAILED")
+            || item.starts_with("EDIT DECLINED")
+            || item.starts_with("VERSION FAILED")
+            || item.starts_with("DELETE REJECTED")
+            || item.starts_with("DELETE FAILED")
+            || item.starts_with("DELETE DECLINED")
+            || item.starts_with("RUN BLOCKED")
+            || item.starts_with("RUN DECLINED")
+            || item.starts_with("NEED ")
+            || item=="The files you requested are included below."
+            || (item.starts_with("RUN `") && !item.contains("exited with code 0."))
+    })
+}
+
 fn agent_signal(reply:&str)->Option<&'static str>{
     let mut fence:Option<(char,usize)>=None;
     for line in reply.lines(){
@@ -1116,6 +1323,20 @@ fn run()->Result<(),String>{
         state=fresh_state();
     }
     ui.event("ready","");
+    let interrupted_task={
+        let queue=ui.queue.lock().map_err(err)?;
+        queue.has_inflight()
+    };
+    if interrupted_task {
+        ui.event("error","An interrupted queued task was found. Review its previous result before using /queue recover or /queue discard. WebCodex will not automatically resend it.");
+    }
+    let queue_error={
+        let queue=ui.queue.lock().map_err(err)?;
+        if queue.has_load_error(){Some(queue.show())}else{None}
+    };
+    if let Some(error)=queue_error{
+        ui.event("error",&error);
+    }
     ui.event("system",if state["codex_import"].is_object(){"Codex history imported. Your next message starts the ChatGPT handoff."}else if opened{"Resumed your earlier ChatGPT chat."}else{"WebCodex · new session"});
     // Restore a recent SQLite window in a single TUI event. The previous
     // implementation sent 100 individual messages, triggering repeated full
@@ -1150,14 +1371,51 @@ fn run()->Result<(),String>{
     let mut agent=Agent{root,db,worker,browser,ui,thread,state,yes:o.yes||o.approve_never,
         allow_run:o.allow_run,approve_never:o.approve_never,max_turns,max_chars,
         max_file_chars:cfg["max_file_chars"].as_u64().unwrap_or(20000) as usize,
-        max_files:cfg["max_files"].as_u64().unwrap_or(4000) as usize};
-    if !o.tasks.is_empty(){agent.task(&o.tasks.join(" "))?;if !o.interactive{return Ok(())}}
+        max_files:cfg["max_files"].as_u64().unwrap_or(4000) as usize,
+        task_confirmed:false};
+    if !o.tasks.is_empty(){
+        let pending={
+            let queue=agent.ui.queue.lock().map_err(err)?;
+            queue.len()>0 || queue.has_inflight()
+        };
+        if pending {
+            return Err("Pending or interrupted queued work exists. Resolve it interactively before submitting a command-line task.".into());
+        }
+        agent.task(&o.tasks.join(" "))?;
+        if !o.interactive{return Ok(())}
+    }
     loop {
         let Some(input)=agent.ui.receive()? else{break};
         if input.trim().is_empty(){continue}
+        if !input.starts_with('/') && !agent.ui.queued_current {
+            let interrupted={
+                let queue=agent.ui.queue.lock().map_err(err)?;
+                queue.has_inflight() || queue.has_load_error()
+            };
+            if interrupted {
+                agent.ui.event("error","Pending queue recovery or corrupted queue data must be resolved before another task can execute. Use /queue to inspect the problem.");
+                continue;
+            }
+        }
         agent.ui.event("busy","true");
+        agent.ui.active.store(true,Ordering::SeqCst);
         let result=if input.starts_with('/') {agent.command(input.trim()).map(|continue_|(continue_,()))}
             else{agent.task(input.trim()).map(|_|(true,()))};
+        if agent.ui.queued_current {
+            if result.is_ok() && agent.task_confirmed {
+                let acknowledgment={
+                    let mut queue=agent.ui.queue.lock().map_err(err)?;
+                    queue.acknowledge()
+                };
+                if let Err(error)=acknowledgment{
+                    agent.ui.event("error",&format!("Queue acknowledgment failed: {error}"));
+                }
+            }else{
+                agent.ui.event("error","Queued task not confirmed complete. Its recovery record was preserved. Review the task before using /queue recover or /queue discard.");
+            }
+            agent.ui.queued_current=false;
+        }
+        agent.ui.active.store(false,Ordering::SeqCst);
         agent.ui.event("busy","false");
         match result{Ok((false,_))=>break,Err(e)=>agent.ui.event("error",&e),_=>{}}
     }
@@ -1197,6 +1455,18 @@ fn main(){if let Err(e)=run(){eprintln!("WebCodex Rust agent error: {e}");std::p
         }
     }
     #[test]fn initial_state_is_compatible(){let v=fresh_state();assert!(v["sent_hash"].is_object());assert_eq!(v["started"],false);}
+    #[test]fn failed_operations_prevent_completion(){
+        assert!(feedback_has_failure(&["EDIT REJECTED: bad block".into()]));
+        assert!(feedback_has_failure(&["EDIT FAILED path: mismatch".into()]));
+        assert!(feedback_has_failure(&["EDIT DECLINED file.rs: user rejected the change".into()]));
+        assert!(feedback_has_failure(&["DELETE DECLINED file.rs: user rejected deletion".into()]));
+        assert!(feedback_has_failure(&["NEED missing.rs: file not found, binary, or ignored".into()]));
+        assert!(feedback_has_failure(&["RUN BLOCKED `cargo test`".into()]));
+        assert!(feedback_has_failure(&["RUN `example` exited with code 1. Output:".into()]));
+        assert!(!feedback_has_failure(&["EDIT APPLIED file.rs".into()]));
+        assert!(!feedback_has_failure(&["RUN `example` exited with code 0. Output:".into()]));
+    }
+
     #[test]fn explicit_completion_signals(){
         assert_eq!(agent_signal("Verified.\nDONE: Implementation finished."),Some("done"));
         assert_eq!(agent_signal("BLOCKED: Authentication required."),Some("blocked"));
